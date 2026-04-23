@@ -620,9 +620,8 @@ export default function Page() {
               </div>
             )}
             {tab !== 'all' && (
-              <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 70 }}>
-                {/* Friends/Groups - reuse ListPanel logic inline */}
-                {React.createElement(() => <>{tab === 'friends' || tab === 'groups' ? <div style={{ paddingTop: 4 }}>{ListPanel}</div> : null}</>)}
+              <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 70 }}>
+                {ListPanel}
               </div>
             )}
           </div>
@@ -648,9 +647,6 @@ export default function Page() {
     </div>
   )
 }
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const React = require('react')
 
 function Bubble({ m, myId }: { m: Message; myId: string }) {
   const me = m.user_id === myId
