@@ -33,6 +33,7 @@ export default function VoiceChat({ userId }: Props) {
       clientRef.current = client
 
       client.on('user-published', async (user: any, mediaType: 'audio' | 'video' | 'datachannel') => {
+        if (user.uid === uid) return
         await client.subscribe(user, mediaType)
         if (mediaType === 'audio') user.audioTrack?.play()
         setCount(c => c + 1)
@@ -40,7 +41,7 @@ export default function VoiceChat({ userId }: Props) {
       client.on('user-left', () => setCount(c => Math.max(0, c - 1)))
 
       await client.join(APP_ID, CHANNEL, token, uid)
-      const track = await AgoraRTC.createMicrophoneAudioTrack()
+      const track = await AgoraRTC.createMicrophoneAudioTrack({ AEC: true, ANS: true, AGC: true })
       trackRef.current = track
       await client.publish([track])
       setJoined(true)
