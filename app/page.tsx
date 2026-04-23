@@ -8,11 +8,12 @@ import { moderate } from '@/lib/moderate'
 const VoiceChat = dynamic(() => import('@/components/VoiceChat'), { ssr: false })
 
 interface Presence {
-  id: string; name: string; status: string; game: string; recruiting: boolean; updated_at: string
+  id: string; name: string; status: string; game: string
+  recruiting: boolean; updated_at: string; server: number
 }
 interface Message {
   id: string; user_id: string; user_name: string; content: string; created_at: string
-  dm_to: string | null; group_id: string | null
+  dm_to: string | null; group_id: string | null; server_id: number | null
 }
 interface Friendship { id: string; requester_id: string; addressee_id: string; status: string }
 interface FriendUser { id: string; username: string }
@@ -36,6 +37,7 @@ export default function Page() {
   const [nameError, setNameError] = useState('')
   const [userName, setUserName]   = useState('')
   const [tab, setTab]             = useState<Tab>('all')
+  const [server, setServer]       = useState(1)
 
   const [statusInput, setStatusInput] = useState('')
   const [gameInput, setGameInput]     = useState('')
@@ -63,6 +65,7 @@ export default function Page() {
 
   const userIdRef    = useRef('')
   const userNameRef  = useRef('')
+  const serverRef    = useRef(1)
   const selFriendRef = useRef<string | null>(null)
   const selGroupRef  = useRef<string | null>(null)
   const srRef        = useRef({ status: '', game: '', recruiting: false })
@@ -78,6 +81,12 @@ export default function Page() {
     if (name) { userNameRef.current = name; setUserName(name); setReady(true) }
   }, [])
 
+  // マイク権限を事前に取得（毎回ポップアップが出ないように）
+  useEffect(() => {
+    if (!ready) return
+    navigator.mediaDevices?.getUserMedia({ audio: true }).catch(() => {})
+  }, [ready])
+
   useEffect(() => { srRef.current = { status: statusInput, game: gameInput, recruiting } }, [statusInput, gameInput, recruiting])
   useEffect(() => { globalEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [globalMsgs])
   useEffect(() => { dmEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [dmMsgs])
@@ -86,6 +95,7 @@ export default function Page() {
   const upsert = useCallback(async (extra?: Partial<Presence>) => {
     await supabase.from('presences').upsert({
       id: userIdRef.current, name: userNameRef.current,
+      server:     extra?.server     ?? serverRef.current,
       status:     extra?.status     ?? srRef.current.status,
       game:       extra?.game       ?? srRef.current.game,
       recruiting: extra?.recruiting ?? srRef.current.recruiting,
@@ -124,6 +134,13 @@ export default function Page() {
     }
   }, [])
 
+  const loadGlobalMsgs = useCallback(async (srv: number) => {
+    const { data } = await supabase.from('messages').select('*')
+      .is('dm_to', null).is('group_id', null).eq('server_id', srv)
+      .order('created_at').limit(100)
+    if (data) setGlobalMsgs(data)
+  }, [])
+
   useEffect(() => {
     if (!ready) return
     const uid = userIdRef.current
@@ -131,9 +148,7 @@ export default function Page() {
 
     supabase.from('presences').select('*').gt('updated_at', ago)
       .then(({ data }) => { if (data) setPresences(data) })
-    supabase.from('messages').select('*').is('dm_to', null).is('group_id', null)
-      .order('created_at').limit(100)
-      .then(({ data }) => { if (data) setGlobalMsgs(data) })
+    loadGlobalMsgs(1)
     loadFriends()
     loadGroups()
 
@@ -155,7 +170,7 @@ export default function Page() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' },
         ({ new: n }) => {
           const msg = n as Message
-          if (!msg.dm_to && !msg.group_id) {
+          if (!msg.dm_to && !msg.group_id && msg.server_id === serverRef.current) {
             setGlobalMsgs(prev => [...prev, msg])
           } else if (msg.dm_to && (msg.user_id === uid || msg.dm_to === uid)) {
             const other = msg.user_id === uid ? msg.dm_to : msg.user_id
@@ -176,7 +191,15 @@ export default function Page() {
       pSub.unsubscribe(); mSub.unsubscribe(); fSub.unsubscribe()
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [ready, loadFriends, loadGroups, upsert])
+  }, [ready, loadFriends, loadGroups, loadGlobalMsgs, upsert])
+
+  const changeServer = (s: number) => {
+    setServer(s)
+    serverRef.current = s
+    setGlobalMsgs([])
+    loadGlobalMsgs(s)
+    upsert()
+  }
 
   const handleSetup = async () => {
     const raw = nameInput.trim().slice(0, 16)
@@ -198,13 +221,17 @@ export default function Page() {
     setUserName(''); setNameInput(''); setReady(false)
     setSelFriend(null); selFriendRef.current = null
     setSelGroup(null);  selGroupRef.current  = null
+    setServer(1); serverRef.current = 1
     setTab('all')
   }
 
   const sendGlobal = async () => {
     const txt = moderate(globalInput.trim())
     if (!txt) return
-    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null })
+    await supabase.from('messages').insert({
+      user_id: userIdRef.current, user_name: userNameRef.current,
+      content: txt, dm_to: null, group_id: null, server_id: serverRef.current,
+    })
     setGlobalInput('')
   }
 
@@ -246,7 +273,9 @@ export default function Page() {
   const sendDm = async () => {
     const txt = moderate(dmInput.trim())
     if (!txt || !selFriend) return
-    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: selFriend })
+    await supabase.from('messages').insert({
+      user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: selFriend,
+    })
     setDmInput('')
   }
 
@@ -262,14 +291,17 @@ export default function Page() {
 
   const openGroup = async (gid: string) => {
     setSelGroup(gid); selGroupRef.current = gid
-    const { data } = await supabase.from('messages').select('*').eq('group_id', gid).order('created_at').limit(100)
+    const { data } = await supabase.from('messages').select('*')
+      .eq('group_id', gid).order('created_at').limit(100)
     if (data) setGroupMsgs(data)
   }
 
   const sendGroupMsg = async () => {
     const txt = moderate(groupInput.trim())
     if (!txt || !selGroup) return
-    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: selGroup })
+    await supabase.from('messages').insert({
+      user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: selGroup,
+    })
     setGroupInput('')
   }
 
@@ -289,7 +321,7 @@ export default function Page() {
   const getFriendId   = (f: Friendship) => f.requester_id === userIdRef.current ? f.addressee_id : f.requester_id
   const getFriendName = (id: string) => friendUsers[id]?.username ?? '...'
 
-  const online  = presences.filter(p => p.id !== userIdRef.current && isOnlineP(p))
+  const online   = presences.filter(p => p.id !== userIdRef.current && isOnlineP(p) && p.server === server)
   const pending  = friends.filter(f => f.status === 'pending' && f.addressee_id === userIdRef.current)
   const accepted = friends.filter(f => f.status === 'accepted')
 
@@ -317,17 +349,33 @@ export default function Page() {
     <div className="flex flex-col" style={{ background: C.bg, minHeight: '100dvh', maxWidth: 480, margin: '0 auto' }}>
 
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 sticky top-0 z-20"
-        style={{ background: C.card, borderBottom: `1px solid ${C.border}` }}>
-        <span className="font-bold" style={{ color: C.accent }}>🎮 ゲーム友達</span>
-        <div className="flex items-center gap-3">
-          <span className="text-sm" style={{ color: C.muted }}>
-            <span style={{ color: '#3fb950' }}>●</span> {userName}
-          </span>
-          <button onClick={handleLogout} className="text-xs px-3 py-1 rounded-lg"
-            style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}>
-            ログアウト
-          </button>
+      <div className="sticky top-0 z-20" style={{ background: C.card, borderBottom: `1px solid ${C.border}` }}>
+        <div className="flex items-center justify-between px-4 py-3">
+          <span className="font-bold" style={{ color: C.accent }}>🎮 ゲーム友達</span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm" style={{ color: C.muted }}>
+              <span style={{ color: '#3fb950' }}>●</span> {userName}
+            </span>
+            <button onClick={handleLogout} className="text-xs px-3 py-1 rounded-lg"
+              style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}>
+              ログアウト
+            </button>
+          </div>
+        </div>
+
+        {/* Server tabs */}
+        <div className="flex px-3 pb-2 gap-1.5">
+          {[1, 2, 3, 4, 5].map(s => (
+            <button key={s} onClick={() => changeServer(s)}
+              className="flex-1 py-1.5 rounded-lg text-xs font-bold transition"
+              style={{
+                background: server === s ? C.accent : 'transparent',
+                color:      server === s ? C.bg : C.muted,
+                border:    `1px solid ${server === s ? C.accent : C.border}`,
+              }}>
+              サーバー{s}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -381,12 +429,22 @@ export default function Page() {
           }
 
           <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-            <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>🎤 ボイスチャット</p>
-            <VoiceChat userId={userIdRef.current} userName={userName} />
+            <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
+              🎤 ボイスチャット — サーバー{server}
+            </p>
+            <VoiceChat
+              key={server}
+              userId={userIdRef.current}
+              userName={userName}
+              channel={`server-${server}`}
+              presences={presences}
+            />
           </section>
 
           <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-            <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>💬 全体チャット</p>
+            <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
+              💬 全体チャット — サーバー{server}
+            </p>
             <div className="h-64 overflow-y-auto flex flex-col gap-2 mb-3">
               {globalMsgs.length === 0 && <p className="text-xs text-center py-8" style={{ color: C.muted }}>まだメッセージがないよ</p>}
               {globalMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
