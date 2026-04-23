@@ -29,10 +29,19 @@ export default function VoiceChat({ userId, userName, channel, presences }: Prop
   const trackRef     = useRef<any>(null)
   const videoRef     = useRef<any>(null)
   const joinedRef    = useRef(false)
+  const presencesRef = useRef<SimplePresence[]>(presences)
   const myUid        = uidFromId(userId)
 
+  useEffect(() => {
+    presencesRef.current = presences
+    setMembers(prev => prev.map(m => {
+      const name = presencesRef.current.find(p => uidFromId(p.id) === m.uid)?.name
+      return name ? { ...m, name } : m
+    }))
+  }, [presences])
+
   const findName = (uid: number) =>
-    presences.find(p => uidFromId(p.id) === uid)?.name ?? `?${uid}`
+    presencesRef.current.find(p => uidFromId(p.id) === uid)?.name ?? `?${uid}`
 
   const leave = async () => {
     videoRef.current?.close()
