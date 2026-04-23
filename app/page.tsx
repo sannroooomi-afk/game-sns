@@ -13,7 +13,7 @@ interface Presence {
 }
 interface Message {
   id: string; user_id: string; user_name: string; content: string; created_at: string
-  dm_to: string | null; group_id: string | null; server_id: number | null
+  dm_to: string | null; group_id: string | null; server_id: number | null; edited?: boolean
 }
 interface Friendship { id: string; requester_id: string; addressee_id: string; status: string }
 interface FriendUser { id: string; username: string }
@@ -21,6 +21,7 @@ interface Group { id: string; name: string; owner_id: string }
 type Tab = 'all' | 'friends' | 'groups'
 type ChatType = 'global' | 'dm' | 'group'
 
+const ADMIN = 'user'
 const ONLINE_MS = 2 * 60 * 1000
 const isOnlineP = (p: Presence) => Date.now() - new Date(p.updated_at).getTime() < ONLINE_MS
 function initUserId() {
@@ -189,6 +190,8 @@ export default function Page() {
   const handleSetup = async () => {
     const raw = nameInput.trim().slice(0, 16); if (!raw) return
     const uid = userIdRef.current
+    const { data: ban } = await supabase.from('bans').select('user_id').eq('user_id', uid).single()
+    if (ban) { setNameError('このアカウントはBANされています'); return }
     const { data: ex } = await supabase.from('users').select('id').eq('username', raw).single()
     if (ex && ex.id !== uid) { setNameError('この名前はすでに使われています'); return }
     const modded = moderate(raw)
@@ -241,6 +244,42 @@ export default function Page() {
     const txt = moderate(groupInput.trim()); if (!txt || !selGroup) return
     await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: selGroup }); setGroupInput('')
   }
+  const deleteMsg = async (msgId: string) => {
+    await supabase.from('messages').delete().eq('id', msgId)
+    setGlobalMsgs(p => p.filter(m => m.id !== msgId))
+    setDmMsgs(p => p.filter(m => m.id !== msgId))
+    setGroupMsgs(p => p.filter(m => m.id !== msgId))
+  }
+  const editMsg = async (msgId: string, content: string) => {
+    const txt = moderate(content.trim()); if (!txt) return
+    await supabase.from('messages').update({ content: txt, edited: true }).eq('id', msgId)
+    const upd = (msgs: Message[]) => msgs.map(m => m.id === msgId ? { ...m, content: txt, edited: true } : m)
+    setGlobalMsgs(upd); setDmMsgs(upd); setGroupMsgs(upd)
+  }
+  const banUser = async (targetId: string, targetName: string) => {
+    if (!window.confirm(`${targetName} をBANしますか？`)) return
+    await Promise.all([
+      supabase.from('bans').insert({ user_id: targetId, reason: '管理者によるBAN' }),
+      supabase.from('presences').delete().eq('id', targetId),
+      supabase.from('messages').delete().eq('user_id', targetId),
+      supabase.from('friendships').delete().or(`requester_id.eq.${targetId},addressee_id.eq.${targetId}`),
+      supabase.from('users').delete().eq('id', targetId),
+    ])
+  }
+  const kickUser = async (targetId: string, targetName: string) => {
+    if (!window.confirm(`${targetName} をKICKしますか？`)) return
+    await supabase.from('presences').delete().eq('id', targetId)
+  }
+  const warnUser = async (targetId: string, targetName: string) => {
+    const reason = window.prompt(`${targetName} への警告内容:`)
+    if (!reason) return
+    await supabase.from('messages').insert({
+      user_id: userIdRef.current, user_name: '⚠️ 管理者',
+      content: `[警告] ${targetName}: ${reason}`,
+      dm_to: null, group_id: null, server_id: serverRef.current,
+    })
+  }
+
   const inviteToGroup = async () => {
     const target = inviteInput.trim(); if (!target || !selGroup) return; setInviteError('')
     const { data: tu } = await supabase.from('users').select('*').eq('username', target).single()
@@ -255,6 +294,7 @@ export default function Page() {
   const online   = presences.filter(p => p.id !== userIdRef.current && isOnlineP(p) && p.server === server)
   const pending  = friends.filter(f => f.status === 'pending' && f.addressee_id === userIdRef.current)
   const accepted = friends.filter(f => f.status === 'accepted')
+  const isAdmin  = userName === ADMIN
 
   const chatTitle = chatType === 'global' ? `# 全体 · サーバー${server}` : chatType === 'dm' ? `@ ${getFName(selFriend!)}` : `# ${groups.find(g => g.id === selGroup)?.name ?? ''}`
 
@@ -316,6 +356,13 @@ export default function Page() {
                   </p>
                 </div>
                 {p.recruiting && <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 10, background: 'rgba(63,185,80,0.15)', color: '#3fb950', flexShrink: 0 }}>募集</span>}
+                {isAdmin && (
+                  <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                    <button onClick={() => warnUser(p.id, p.name)} title="警告" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, padding: 2, opacity: 0.7 }}>⚠️</button>
+                    <button onClick={() => kickUser(p.id, p.name)} title="キック" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, padding: 2, opacity: 0.7 }}>👢</button>
+                    <button onClick={() => banUser(p.id, p.name)} title="BAN" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, padding: 2, opacity: 0.7 }}>🔨</button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -458,17 +505,17 @@ export default function Page() {
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {chatType === 'global' && <>
           {globalMsgs.length === 0 && <p style={{ textAlign: 'center', color: MUT, fontSize: 12, paddingTop: 32 }}>まだメッセージがないよ</p>}
-          {globalMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
+          {globalMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} isAdmin={isAdmin} onDelete={deleteMsg} onEdit={editMsg} />)}
           <div ref={globalEndRef} />
         </>}
         {chatType === 'dm' && <>
           {dmMsgs.length === 0 && <p style={{ textAlign: 'center', color: MUT, fontSize: 12, paddingTop: 32 }}>まだメッセージがないよ</p>}
-          {dmMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
+          {dmMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} isAdmin={isAdmin} onDelete={deleteMsg} onEdit={editMsg} />)}
           <div ref={dmEndRef} />
         </>}
         {chatType === 'group' && <>
           {groupMsgs.length === 0 && <p style={{ textAlign: 'center', color: MUT, fontSize: 12, paddingTop: 32 }}>まだメッセージがないよ</p>}
-          {groupMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
+          {groupMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} isAdmin={isAdmin} onDelete={deleteMsg} onEdit={editMsg} />)}
           <div ref={groupEndRef} />
         </>}
       </div>
@@ -660,18 +707,43 @@ export default function Page() {
   )
 }
 
-function Bubble({ m, myId }: { m: Message; myId: string }) {
+function Bubble({ m, myId, isAdmin, onDelete, onEdit }: {
+  m: Message; myId: string; isAdmin: boolean
+  onDelete: (id: string) => void; onEdit: (id: string, content: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [editVal, setEditVal] = useState(m.content)
   const me = m.user_id === myId
+  const system = m.user_id === 'system' || m.user_name.startsWith('⚠️')
+
   return (
     <div style={{ display: 'flex', gap: 8, flexDirection: me ? 'row-reverse' : 'row' }}>
-      <div style={{ width: 28, height: 28, borderRadius: '50%', background: me ? 'rgba(0,188,212,0.2)' : '#30363d', color: me ? ACC : MUT, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+      <div style={{ width: 28, height: 28, borderRadius: '50%', background: system ? 'rgba(240,136,62,0.2)' : me ? 'rgba(0,188,212,0.2)' : '#30363d', color: system ? '#f0883e' : me ? ACC : MUT, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
         {m.user_name[0]?.toUpperCase()}
       </div>
       <div style={{ maxWidth: '75%', display: 'flex', flexDirection: 'column', gap: 2, alignItems: me ? 'flex-end' : 'flex-start' }}>
         <span style={{ fontSize: 10, color: MUT, padding: '0 4px' }}>{m.user_name}</span>
-        <div style={{ padding: '8px 12px', borderRadius: 16, fontSize: 13, wordBreak: 'break-word', ...(me ? { background: ACC, color: BG, borderTopRightRadius: 4 } : { background: '#21262d', color: TXT, borderTopLeftRadius: 4 }) }}>
-          {m.content}
-        </div>
+        {editing ? (
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <input value={editVal} onChange={e => setEditVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { onEdit(m.id, editVal); setEditing(false) } if (e.key === 'Escape') setEditing(false) }}
+              autoFocus
+              style={{ background: '#21262d', border: '1px solid ' + ACC, borderRadius: 8, padding: '6px 10px', color: TXT, fontSize: 13, outline: 'none', minWidth: 120 }} />
+            <button onClick={() => { onEdit(m.id, editVal); setEditing(false) }} style={{ background: ACC, color: BG, border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✓</button>
+            <button onClick={() => setEditing(false)} style={{ background: '#30363d', color: MUT, border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}>✕</button>
+          </div>
+        ) : (
+          <div style={{ padding: '8px 12px', borderRadius: 16, fontSize: 13, wordBreak: 'break-word', ...(me ? { background: ACC, color: BG, borderTopRightRadius: 4 } : { background: '#21262d', color: TXT, borderTopLeftRadius: 4 }) }}>
+            {m.content}
+            {m.edited && <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 4 }}>(編集済)</span>}
+          </div>
+        )}
+        {!editing && !system && (
+          <div style={{ display: 'flex', gap: 4, padding: '0 4px' }}>
+            {me && <button onClick={() => { setEditVal(m.content); setEditing(true) }} style={{ fontSize: 10, color: MUT, background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', borderRadius: 4 }}>編集</button>}
+            {(me || isAdmin) && <button onClick={() => onDelete(m.id)} style={{ fontSize: 10, color: '#f85149', background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', borderRadius: 4 }}>削除</button>}
+          </div>
+        )}
       </div>
     </div>
   )
