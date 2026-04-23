@@ -747,10 +747,18 @@ function Bubble({ m, myId, isAdmin, onDelete, onEdit }: {
             {m.edited && <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 4 }}>(編集済)</span>}
           </div>
         )}
-        {!editing && !system && (
-          <div style={{ display: 'flex', gap: 4, padding: '0 4px' }}>
-            {me && <button onClick={() => { setEditVal(m.content); setEditing(true) }} style={{ fontSize: 10, color: MUT, background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', borderRadius: 4 }}>編集</button>}
-            {(me || isAdmin) && <button onClick={() => onDelete(m.id)} style={{ fontSize: 10, color: '#f85149', background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', borderRadius: 4 }}>削除</button>}
+        {!editing && !system && (me || isAdmin) && (
+          <div style={{ display: 'flex', gap: 4, padding: '2px 4px' }}>
+            {me && (
+              <button onClick={() => { setEditVal(m.content); setEditing(true) }}
+                style={{ fontSize: 11, color: '#8b949e', background: '#21262d', border: '1px solid #30363d', cursor: 'pointer', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+                ✏️ 編集
+              </button>
+            )}
+            <button onClick={() => onDelete(m.id)}
+              style={{ fontSize: 11, color: '#f85149', background: 'rgba(248,81,73,0.1)', border: '1px solid rgba(248,81,73,0.3)', cursor: 'pointer', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+              🗑️ 削除
+            </button>
           </div>
         )}
       </div>
