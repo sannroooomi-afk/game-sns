@@ -19,17 +19,23 @@ interface Friendship { id: string; requester_id: string; addressee_id: string; s
 interface FriendUser { id: string; username: string }
 interface Group { id: string; name: string; owner_id: string }
 type Tab = 'all' | 'friends' | 'groups'
+type ChatType = 'global' | 'dm' | 'group'
 
 const ONLINE_MS = 2 * 60 * 1000
 const isOnlineP = (p: Presence) => Date.now() - new Date(p.updated_at).getTime() < ONLINE_MS
-
 function initUserId() {
   let id = localStorage.getItem('gf_uid')
   if (!id) { id = crypto.randomUUID(); localStorage.setItem('gf_uid', id) }
   return id
 }
 
-const C = { bg: '#0d1117', card: '#161b22', border: '#30363d', accent: '#00bcd4', muted: '#8b949e', text: '#e6edf3' }
+const BG   = '#0d1117'
+const CARD = '#161b22'
+const SIDE = '#0d1117'
+const BD   = '#30363d'
+const ACC  = '#00bcd4'
+const MUT  = '#8b949e'
+const TXT  = '#e6edf3'
 
 export default function Page() {
   const [ready, setReady]         = useState(false)
@@ -38,6 +44,7 @@ export default function Page() {
   const [userName, setUserName]   = useState('')
   const [tab, setTab]             = useState<Tab>('all')
   const [server, setServer]       = useState(1)
+  const [chatType, setChatType]   = useState<ChatType>('global')
   const [isDesktop, setIsDesktop] = useState(false)
 
   const [statusInput, setStatusInput] = useState('')
@@ -76,24 +83,16 @@ export default function Page() {
   const groupEndRef  = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const uid = initUserId()
-    userIdRef.current = uid
+    const uid = initUserId(); userIdRef.current = uid
     const name = localStorage.getItem('gf_name') ?? ''
     if (name) { userNameRef.current = name; setUserName(name); setReady(true) }
   }, [])
-
   useEffect(() => {
-    const check = () => setIsDesktop(window.innerWidth >= 1024)
-    check()
-    window.addEventListener('resize', check)
+    const check = () => setIsDesktop(window.innerWidth >= 768)
+    check(); window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
-
-  useEffect(() => {
-    if (!ready) return
-    navigator.mediaDevices?.getUserMedia({ audio: true }).catch(() => {})
-  }, [ready])
-
+  useEffect(() => { if (!ready) return; navigator.mediaDevices?.getUserMedia({ audio: true }).catch(() => {}) }, [ready])
   useEffect(() => { srRef.current = { status: statusInput, game: gameInput, recruiting } }, [statusInput, gameInput, recruiting])
   useEffect(() => { globalEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [globalMsgs])
   useEffect(() => { dmEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [dmMsgs])
@@ -102,9 +101,9 @@ export default function Page() {
   const upsert = useCallback(async (extra?: Partial<Presence>) => {
     await supabase.from('presences').upsert({
       id: userIdRef.current, name: userNameRef.current,
-      server:     extra?.server     ?? serverRef.current,
-      status:     extra?.status     ?? srRef.current.status,
-      game:       extra?.game       ?? srRef.current.game,
+      server: extra?.server ?? serverRef.current,
+      status: extra?.status ?? srRef.current.status,
+      game:   extra?.game   ?? srRef.current.game,
       recruiting: extra?.recruiting ?? srRef.current.recruiting,
       updated_at: new Date().toISOString(),
     })
@@ -112,36 +111,28 @@ export default function Page() {
 
   const loadFriends = useCallback(async () => {
     const uid = userIdRef.current
-    const { data } = await supabase.from('friendships')
-      .select('*').or(`requester_id.eq.${uid},addressee_id.eq.${uid}`)
+    const { data } = await supabase.from('friendships').select('*')
+      .or(`requester_id.eq.${uid},addressee_id.eq.${uid}`)
     if (!data) return
     setFriends(data)
     const ids = data.map(f => f.requester_id === uid ? f.addressee_id : f.requester_id)
-    if (ids.length === 0) return
+    if (!ids.length) return
     const { data: users } = await supabase.from('users').select('*').in('id', ids)
-    if (users) {
-      const map: Record<string, FriendUser> = {}
-      users.forEach(u => { map[u.id] = u })
-      setFriendUsers(map)
-    }
+    if (users) { const m: Record<string, FriendUser> = {}; users.forEach(u => { m[u.id] = u }); setFriendUsers(m) }
   }, [])
 
   const loadGroups = useCallback(async () => {
     const uid = userIdRef.current
     const { data: mems } = await supabase.from('group_members').select('group_id').eq('user_id', uid)
-    if (!mems || mems.length === 0) { setGroups([]); return }
+    if (!mems?.length) { setGroups([]); return }
     const ids = mems.map((m: any) => m.group_id)
     const { data: gs } = await supabase.from('groups').select('*').in('id', ids)
     if (gs) setGroups(gs)
-    const { data: allMems } = await supabase.from('group_members').select('*').in('group_id', ids)
-    if (allMems) {
-      const cnt: Record<string, number> = {}
-      allMems.forEach((m: any) => { cnt[m.group_id] = (cnt[m.group_id] ?? 0) + 1 })
-      setGroupMemCount(cnt)
-    }
+    const { data: am } = await supabase.from('group_members').select('*').in('group_id', ids)
+    if (am) { const c: Record<string, number> = {}; am.forEach((m: any) => { c[m.group_id] = (c[m.group_id] ?? 0) + 1 }); setGroupMemCount(c) }
   }, [])
 
-  const loadGlobalMsgs = useCallback(async (srv: number) => {
+  const loadGlobal = useCallback(async (srv: number) => {
     const { data } = await supabase.from('messages').select('*')
       .is('dm_to', null).is('group_id', null).eq('server_id', srv)
       .order('created_at').limit(100)
@@ -152,123 +143,76 @@ export default function Page() {
     if (!ready) return
     const uid = userIdRef.current
     const ago = new Date(Date.now() - ONLINE_MS).toISOString()
-    supabase.from('presences').select('*').gt('updated_at', ago)
-      .then(({ data }) => { if (data) setPresences(data) })
-    loadGlobalMsgs(1)
-    loadFriends()
-    loadGroups()
+    supabase.from('presences').select('*').gt('updated_at', ago).then(({ data }) => { if (data) setPresences(data) })
+    loadGlobal(1); loadFriends(); loadGroups()
 
-    const pSub = supabase.channel('pres-rt')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'presences' },
-        ({ eventType, new: n, old: o }) => {
-          if (eventType === 'DELETE') setPresences(prev => prev.filter(p => p.id !== (o as any).id))
-          else {
-            const p = n as Presence
-            setPresences(prev => {
-              const i = prev.findIndex(x => x.id === p.id)
-              if (i >= 0) { const a = [...prev]; a[i] = p; return a }
-              return [p, ...prev]
-            })
-          }
-        }).subscribe()
+    const pSub = supabase.channel('pres-rt').on('postgres_changes', { event: '*', schema: 'public', table: 'presences' },
+      ({ eventType, new: n, old: o }) => {
+        if (eventType === 'DELETE') setPresences(p => p.filter(x => x.id !== (o as any).id))
+        else { const p = n as Presence; setPresences(prev => { const i = prev.findIndex(x => x.id === p.id); if (i >= 0) { const a = [...prev]; a[i] = p; return a } return [p, ...prev] }) }
+      }).subscribe()
 
-    const mSub = supabase.channel('msg-rt')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' },
-        ({ new: n }) => {
-          const msg = n as Message
-          if (!msg.dm_to && !msg.group_id && msg.server_id === serverRef.current) {
-            setGlobalMsgs(prev => [...prev, msg])
-          } else if (msg.dm_to && (msg.user_id === uid || msg.dm_to === uid)) {
-            const other = msg.user_id === uid ? msg.dm_to : msg.user_id
-            if (selFriendRef.current === other) setDmMsgs(prev => [...prev, msg])
-          } else if (msg.group_id && msg.group_id === selGroupRef.current) {
-            setGroupMsgs(prev => [...prev, msg])
-          }
-        }).subscribe()
+    const mSub = supabase.channel('msg-rt').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' },
+      ({ new: n }) => {
+        const msg = n as Message
+        if (!msg.dm_to && !msg.group_id && msg.server_id === serverRef.current) setGlobalMsgs(p => [...p, msg])
+        else if (msg.dm_to && (msg.user_id === uid || msg.dm_to === uid)) {
+          const other = msg.user_id === uid ? msg.dm_to : msg.user_id
+          if (selFriendRef.current === other) setDmMsgs(p => [...p, msg])
+        } else if (msg.group_id && msg.group_id === selGroupRef.current) setGroupMsgs(p => [...p, msg])
+      }).subscribe()
 
-    const fSub = supabase.channel('friend-rt')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' },
-        () => loadFriends()).subscribe()
+    const fSub = supabase.channel('friend-rt').on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => loadFriends()).subscribe()
 
-    upsert()
-    timerRef.current = setInterval(() => upsert(), 60_000)
-    return () => {
-      pSub.unsubscribe(); mSub.unsubscribe(); fSub.unsubscribe()
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
-  }, [ready, loadFriends, loadGroups, loadGlobalMsgs, upsert])
+    upsert(); timerRef.current = setInterval(() => upsert(), 60_000)
+    return () => { pSub.unsubscribe(); mSub.unsubscribe(); fSub.unsubscribe(); if (timerRef.current) clearInterval(timerRef.current) }
+  }, [ready, loadFriends, loadGroups, loadGlobal, upsert])
 
-  const changeServer = (s: number) => {
-    setServer(s); serverRef.current = s
-    setGlobalMsgs([]); loadGlobalMsgs(s); upsert()
-  }
-
-  const handleSetup = async () => {
-    const raw = nameInput.trim().slice(0, 16)
-    if (!raw) return
-    const uid = userIdRef.current
-    const { data: existing } = await supabase.from('users').select('id').eq('username', raw).single()
-    if (existing && existing.id !== uid) { setNameError('この名前はすでに使われています'); return }
-    const modded = moderate(raw)
-    await supabase.from('users').upsert({ id: uid, username: modded })
-    localStorage.setItem('gf_name', modded)
-    userNameRef.current = modded
-    setUserName(modded); setNameError(''); setReady(true)
-  }
-
+  const changeServer = (s: number) => { setServer(s); serverRef.current = s; setGlobalMsgs([]); loadGlobal(s); upsert() }
   const handleLogout = () => {
     localStorage.removeItem('gf_name'); userNameRef.current = ''
     if (timerRef.current) clearInterval(timerRef.current)
     setUserName(''); setNameInput(''); setReady(false)
-    setSelFriend(null); selFriendRef.current = null
-    setSelGroup(null); selGroupRef.current = null
-    setServer(1); serverRef.current = 1; setTab('all')
+    setSelFriend(null); selFriendRef.current = null; setSelGroup(null); selGroupRef.current = null
+    setServer(1); serverRef.current = 1; setTab('all'); setChatType('global')
   }
-
+  const handleSetup = async () => {
+    const raw = nameInput.trim().slice(0, 16); if (!raw) return
+    const uid = userIdRef.current
+    const { data: ex } = await supabase.from('users').select('id').eq('username', raw).single()
+    if (ex && ex.id !== uid) { setNameError('この名前はすでに使われています'); return }
+    const modded = moderate(raw)
+    await supabase.from('users').upsert({ id: uid, username: modded })
+    localStorage.setItem('gf_name', modded); userNameRef.current = modded
+    setUserName(modded); setNameError(''); setReady(true)
+  }
   const sendGlobal = async () => {
-    const txt = moderate(globalInput.trim())
-    if (!txt) return
-    await supabase.from('messages').insert({
-      user_id: userIdRef.current, user_name: userNameRef.current,
-      content: txt, dm_to: null, group_id: null, server_id: serverRef.current,
-    })
+    const txt = moderate(globalInput.trim()); if (!txt) return
+    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current })
     setGlobalInput('')
   }
-
   const sendFriendReq = async () => {
-    const target = addInput.trim(); if (!target) return
-    setAddError('')
+    const target = addInput.trim(); if (!target) return; setAddError('')
     const uid = userIdRef.current
     if (target === userNameRef.current) { setAddError('自分には送れないよ'); return }
     const { data: tu } = await supabase.from('users').select('*').eq('username', target).single()
     if (!tu) { setAddError('ユーザーが見つかりません'); return }
-    const { data: ex } = await supabase.from('friendships').select('id')
-      .or(`and(requester_id.eq.${uid},addressee_id.eq.${tu.id}),and(requester_id.eq.${tu.id},addressee_id.eq.${uid})`)
-    if (ex && ex.length > 0) { setAddError('すでに申請済みか友達です'); return }
+    const { data: ex } = await supabase.from('friendships').select('id').or(`and(requester_id.eq.${uid},addressee_id.eq.${tu.id}),and(requester_id.eq.${tu.id},addressee_id.eq.${uid})`)
+    if (ex?.length) { setAddError('すでに申請済みか友達です'); return }
     await supabase.from('friendships').insert({ requester_id: uid, addressee_id: tu.id })
     setAddInput(''); loadFriends()
   }
-
-  const acceptFriend = async (id: string) => {
-    await supabase.from('friendships').update({ status: 'accepted' }).eq('id', id); loadFriends()
-  }
-  const removeFriend = async (id: string) => {
-    await supabase.from('friendships').delete().eq('id', id)
-    setSelFriend(null); selFriendRef.current = null; loadFriends()
-  }
+  const acceptFriend = async (id: string) => { await supabase.from('friendships').update({ status: 'accepted' }).eq('id', id); loadFriends() }
+  const removeFriend = async (id: string) => { await supabase.from('friendships').delete().eq('id', id); setSelFriend(null); selFriendRef.current = null; loadFriends() }
   const openDm = async (fuid: string) => {
-    setSelFriend(fuid); selFriendRef.current = fuid
+    setSelFriend(fuid); selFriendRef.current = fuid; setChatType('dm')
     const uid = userIdRef.current
-    const { data } = await supabase.from('messages').select('*')
-      .or(`and(user_id.eq.${uid},dm_to.eq.${fuid}),and(user_id.eq.${fuid},dm_to.eq.${uid})`)
-      .order('created_at').limit(100)
+    const { data } = await supabase.from('messages').select('*').or(`and(user_id.eq.${uid},dm_to.eq.${fuid}),and(user_id.eq.${fuid},dm_to.eq.${uid})`).order('created_at').limit(100)
     if (data) setDmMsgs(data)
   }
   const sendDm = async () => {
     const txt = moderate(dmInput.trim()); if (!txt || !selFriend) return
-    await supabase.from('messages').insert({
-      user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: selFriend,
-    }); setDmInput('')
+    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: selFriend }); setDmInput('')
   }
   const createGroup = async () => {
     const name = newGroupName.trim(); if (!name) return
@@ -279,423 +223,448 @@ export default function Page() {
     setNewGroupName(''); loadGroups()
   }
   const openGroup = async (gid: string) => {
-    setSelGroup(gid); selGroupRef.current = gid
+    setSelGroup(gid); selGroupRef.current = gid; setChatType('group')
     const { data } = await supabase.from('messages').select('*').eq('group_id', gid).order('created_at').limit(100)
     if (data) setGroupMsgs(data)
   }
   const sendGroupMsg = async () => {
     const txt = moderate(groupInput.trim()); if (!txt || !selGroup) return
-    await supabase.from('messages').insert({
-      user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: selGroup,
-    }); setGroupInput('')
+    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: selGroup }); setGroupInput('')
   }
   const inviteToGroup = async () => {
-    const target = inviteInput.trim(); if (!target || !selGroup) return
-    setInviteError('')
+    const target = inviteInput.trim(); if (!target || !selGroup) return; setInviteError('')
     const { data: tu } = await supabase.from('users').select('*').eq('username', target).single()
     if (!tu) { setInviteError('ユーザーが見つかりません'); return }
-    const isFriend = friends.some(f => f.status === 'accepted' &&
-      (f.requester_id === tu.id || f.addressee_id === tu.id))
-    if (!isFriend) { setInviteError('友達のみ招待できます'); return }
+    if (!friends.some(f => f.status === 'accepted' && (f.requester_id === tu.id || f.addressee_id === tu.id))) { setInviteError('友達のみ招待できます'); return }
     await supabase.from('group_members').upsert({ group_id: selGroup, user_id: tu.id })
     setInviteInput(''); loadGroups()
   }
 
-  const getFriendId   = (f: Friendship) => f.requester_id === userIdRef.current ? f.addressee_id : f.requester_id
-  const getFriendName = (id: string) => friendUsers[id]?.username ?? '...'
-  const online  = presences.filter(p => p.id !== userIdRef.current && isOnlineP(p) && p.server === server)
+  const getFId   = (f: Friendship) => f.requester_id === userIdRef.current ? f.addressee_id : f.requester_id
+  const getFName = (id: string) => friendUsers[id]?.username ?? '...'
+  const online   = presences.filter(p => p.id !== userIdRef.current && isOnlineP(p) && p.server === server)
   const pending  = friends.filter(f => f.status === 'pending' && f.addressee_id === userIdRef.current)
   const accepted = friends.filter(f => f.status === 'accepted')
 
+  const chatTitle = chatType === 'global' ? `# 全体 · サーバー${server}` : chatType === 'dm' ? `@ ${getFName(selFriend!)}` : `# ${groups.find(g => g.id === selGroup)?.name ?? ''}`
+
   // ── Setup ────────────────────────────────────────────────
   if (!ready) return (
-    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: C.bg }}>
-      <div className="w-full max-w-sm rounded-2xl p-8" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-        <div className="text-4xl text-center mb-2">🎮</div>
-        <h1 className="text-xl font-bold text-center mb-1" style={{ color: C.accent }}>ゲーム友達SNS</h1>
-        <p className="text-sm text-center mb-6" style={{ color: C.muted }}>ニックネームを決めよう（世界で一つだけ）</p>
+    <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: BG, padding: 16 }}>
+      <div style={{ width: '100%', maxWidth: 360, background: CARD, border: `1px solid ${BD}`, borderRadius: 20, padding: 32 }}>
+        <div style={{ fontSize: 40, textAlign: 'center', marginBottom: 8 }}>🎮</div>
+        <h1 style={{ color: ACC, fontWeight: 700, fontSize: 20, textAlign: 'center', marginBottom: 4 }}>ゲーム友達SNS</h1>
+        <p style={{ color: MUT, fontSize: 13, textAlign: 'center', marginBottom: 24 }}>ニックネームを決めよう（世界で一つだけ）</p>
         <input value={nameInput} onChange={e => { setNameInput(e.target.value); setNameError('') }}
-          onKeyDown={e => e.key === 'Enter' && handleSetup()}
-          placeholder="名前（最大16文字）" maxLength={16}
-          className="w-full rounded-lg px-4 py-3 mb-2 outline-none text-sm"
-          style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
-        {nameError && <p className="text-xs mb-2" style={{ color: '#f85149' }}>{nameError}</p>}
-        <button onClick={handleSetup} className="w-full font-bold py-3 rounded-lg text-sm mt-2"
-          style={{ background: C.accent, color: C.bg }}>はじめる</button>
+          onKeyDown={e => e.key === 'Enter' && handleSetup()} placeholder="名前（最大16文字）" maxLength={16}
+          style={{ width: '100%', background: BG, border: `1px solid ${BD}`, borderRadius: 10, padding: '12px 16px', color: TXT, fontSize: 14, outline: 'none', boxSizing: 'border-box', marginBottom: 8 }} />
+        {nameError && <p style={{ color: '#f85149', fontSize: 12, marginBottom: 8 }}>{nameError}</p>}
+        <button onClick={handleSetup} style={{ width: '100%', background: ACC, color: BG, fontWeight: 700, fontSize: 14, padding: '12px 0', borderRadius: 10, border: 'none', cursor: 'pointer', marginTop: 4 }}>
+          はじめる
+        </button>
       </div>
     </div>
   )
 
-  // ── Shared UI blocks ──────────────────────────────────────
-  const StatusSection = (
-    <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-      <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>自分のステータス</p>
-      <input value={gameInput} onChange={e => setGameInput(e.target.value)}
-        placeholder="ゲーム名" className="w-full rounded-lg px-3 py-2 text-sm mb-2 outline-none"
-        style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
-      <input value={statusInput} onChange={e => setStatusInput(e.target.value)}
-        onKeyDown={e => e.key === 'Enter' && upsert()}
-        placeholder="今何してる？" className="w-full rounded-lg px-3 py-2 text-sm mb-3 outline-none"
-        style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
-      <div className="flex gap-2">
-        <button onClick={() => upsert()} className="flex-1 font-bold py-2 rounded-lg text-sm"
-          style={{ background: C.accent, color: C.bg }}>更新</button>
-        <button onClick={() => { const n = !recruiting; setRecruiting(n); upsert({ recruiting: n }) }}
-          className="flex-1 font-bold py-2 rounded-lg text-sm"
-          style={{ background: recruiting ? 'rgba(63,185,80,0.15)' : 'transparent', border: `1px solid ${recruiting ? '#3fb950' : C.border}`, color: recruiting ? '#3fb950' : C.muted }}>
-          {recruiting ? '✋ 募集中！' : '一緒に募集'}
-        </button>
+  // ── List panel content ────────────────────────────────────
+  const ListPanel = (
+    <div style={{ width: isDesktop ? 240 : '100%', flexShrink: 0, background: CARD, borderRight: isDesktop ? `1px solid ${BD}` : 'none', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Panel header */}
+      <div style={{ padding: '14px 16px 10px', borderBottom: `1px solid ${BD}`, flexShrink: 0 }}>
+        <p style={{ color: TXT, fontWeight: 700, fontSize: 14 }}>
+          {tab === 'all' ? `サーバー ${server}` : tab === 'friends' ? '友達' : 'グループ'}
+        </p>
+        {tab === 'all' && <p style={{ color: MUT, fontSize: 11, marginTop: 2 }}>{online.length}人オンライン</p>}
       </div>
-    </section>
-  )
 
-  const OnlineSection = (
-    <section className="mb-3">
-      <p className="text-xs font-semibold uppercase tracking-wide mb-2 px-1" style={{ color: C.muted }}>
-        オンライン {online.length > 0 && `(${online.length})`}
-      </p>
-      {online.length === 0
-        ? <p className="text-sm p-3 rounded-xl" style={{ background: C.card, border: `1px solid ${C.border}`, color: C.muted }}>まだ誰もいないよ</p>
-        : <div className="flex flex-col gap-2">{online.map(p => (
-          <div key={p.id} className="rounded-xl p-3 flex items-center gap-3"
-            style={{ background: C.card, border: `1px solid ${p.recruiting ? '#3fb950' : C.border}` }}>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
-              style={{ background: 'rgba(0,188,212,0.15)', color: C.accent }}>{p.name[0]?.toUpperCase()}</div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="font-semibold text-sm truncate" style={{ color: C.text }}>{p.name}</span>
-                {p.recruiting && <span className="text-xs px-1.5 py-0.5 rounded-full shrink-0"
-                  style={{ background: 'rgba(63,185,80,0.15)', color: '#3fb950' }}>募集中</span>}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {/* ── 全体 list ── */}
+        {tab === 'all' && (
+          <div style={{ padding: 8 }}>
+            {/* Global chat button */}
+            <button onClick={() => setChatType('global')}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: chatType === 'global' ? 'rgba(0,188,212,0.12)' : 'transparent', border: 'none', cursor: 'pointer', marginBottom: 4 }}>
+              <span style={{ fontSize: 18 }}>💬</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: chatType === 'global' ? ACC : MUT }}>全体チャット</span>
+            </button>
+
+            <p style={{ fontSize: 10, fontWeight: 700, color: MUT, padding: '10px 10px 4px', textTransform: 'uppercase', letterSpacing: 1 }}>
+              オンライン — {online.length}
+            </p>
+            {online.map(p => (
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', borderRadius: 8 }}>
+                <div style={{ position: 'relative', flexShrink: 0 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 }}>
+                    {p.name[0]?.toUpperCase()}
+                  </div>
+                  <span style={{ position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: '50%', background: '#3fb950', border: '2px solid ' + CARD }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: TXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
+                  <p style={{ fontSize: 11, color: MUT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.game ? `${p.game} · ` : ''}{p.status || 'オンライン'}
+                  </p>
+                </div>
+                {p.recruiting && <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 10, background: 'rgba(63,185,80,0.15)', color: '#3fb950', flexShrink: 0 }}>募集</span>}
               </div>
-              <p className="text-xs truncate" style={{ color: C.muted }}>
-                {p.game && <span style={{ color: C.accent }}>{p.game} · </span>}{p.status || 'オンライン'}
-              </p>
-            </div>
-          </div>
-        ))}</div>
-      }
-    </section>
-  )
-
-  const VoiceSection = (
-    <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-      <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
-        🎤 ボイス — サーバー{server}
-      </p>
-      <VoiceChat key={server} userId={userIdRef.current} userName={userName}
-        channel={`server-${server}`} presences={presences} />
-    </section>
-  )
-
-  const navItems: { t: Tab; icon: string; label: string }[] = [
-    { t: 'all', icon: '🌐', label: '全体' },
-    { t: 'friends', icon: '👥', label: '友達' },
-    { t: 'groups', icon: '💬', label: 'グループ' },
-  ]
-
-  // ── Main app ──────────────────────────────────────────────
-  return (
-    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', background: C.bg }}>
-
-      {/* Header */}
-      <header style={{ flexShrink: 0, background: C.card, borderBottom: `1px solid ${C.border}`, zIndex: 20 }}>
-        <div className="flex items-center justify-between px-4 py-3">
-          <span className="font-bold text-base" style={{ color: C.accent }}>🎮 ゲーム友達</span>
-          <div className="flex items-center gap-3">
-            <span className="text-sm hidden sm:block" style={{ color: C.muted }}>
-              <span style={{ color: '#3fb950' }}>●</span> {userName}
-            </span>
-            <span className="text-sm sm:hidden" style={{ color: '#3fb950' }}>●</span>
-            <button onClick={handleLogout} className="text-xs px-3 py-1 rounded-lg"
-              style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}>
-              ログアウト
-            </button>
-          </div>
-        </div>
-        {/* Mobile server tabs */}
-        <div className="flex px-3 pb-2 gap-1.5 lg:hidden">
-          {[1,2,3,4,5].map(s => (
-            <button key={s} onClick={() => changeServer(s)}
-              className="flex-1 py-1.5 rounded-lg text-xs font-bold"
-              style={{ background: server === s ? C.accent : 'transparent', color: server === s ? C.bg : C.muted, border: `1px solid ${server === s ? C.accent : C.border}` }}>
-              {s}
-            </button>
-          ))}
-        </div>
-      </header>
-
-      {/* Body */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-
-        {/* Left sidebar — md+ */}
-        <aside className="hidden md:flex flex-col overflow-y-auto"
-          style={{ width: 220, flexShrink: 0, background: C.card, borderRight: `1px solid ${C.border}` }}>
-          <div className="p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wide mb-2 px-1" style={{ color: C.muted }}>サーバー</p>
-            {[1,2,3,4,5].map(s => (
-              <button key={s} onClick={() => changeServer(s)}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold mb-1"
-                style={{ background: server === s ? 'rgba(0,188,212,0.12)' : 'transparent', color: server === s ? C.accent : C.muted }}>
-                <span className="w-5 h-5 rounded flex items-center justify-center text-xs font-bold"
-                  style={{ background: server === s ? C.accent : C.border, color: server === s ? C.bg : C.muted }}>
-                  {s}
-                </span>
-                サーバー{s}
-              </button>
             ))}
           </div>
-          <div className="p-3" style={{ borderTop: `1px solid ${C.border}` }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide mb-2 px-1" style={{ color: C.muted }}>メニュー</p>
-            {navItems.map(({ t, icon, label }) => {
-              const badge = t === 'friends' && pending.length > 0 ? pending.length : 0
+        )}
+
+        {/* ── 友達 list ── */}
+        {tab === 'friends' && (
+          <div>
+            {/* Add friend */}
+            <div style={{ padding: '10px 10px 0' }}>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input value={addInput} onChange={e => { setAddInput(e.target.value); setAddError('') }}
+                  onKeyDown={e => e.key === 'Enter' && sendFriendReq()}
+                  placeholder="ユーザー名で追加"
+                  style={{ flex: 1, background: BG, border: `1px solid ${BD}`, borderRadius: 8, padding: '8px 10px', color: TXT, fontSize: 12, outline: 'none' }} />
+                <button onClick={sendFriendReq} style={{ background: ACC, color: BG, border: 'none', borderRadius: 8, padding: '0 12px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>追加</button>
+              </div>
+              {addError && <p style={{ color: '#f85149', fontSize: 11, marginTop: 4 }}>{addError}</p>}
+            </div>
+
+            {/* Pending */}
+            {pending.length > 0 && (
+              <div style={{ padding: '10px 10px 0' }}>
+                <p style={{ fontSize: 10, fontWeight: 700, color: '#f0883e', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>申請 {pending.length}</p>
+                {pending.map(f => (
+                  <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: `1px solid ${BD}` }}>
+                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(240,136,62,0.15)', color: '#f0883e', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13, flexShrink: 0 }}>
+                      {getFName(f.requester_id)[0]?.toUpperCase()}
+                    </div>
+                    <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: TXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getFName(f.requester_id)}</span>
+                    <button onClick={() => acceptFriend(f.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, padding: 2 }}>✅</button>
+                    <button onClick={() => removeFriend(f.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, padding: 2 }}>❌</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Friends list */}
+            <p style={{ fontSize: 10, fontWeight: 700, color: MUT, padding: '12px 20px 4px', textTransform: 'uppercase', letterSpacing: 1 }}>
+              友達 — {accepted.length}
+            </p>
+            {accepted.map(f => {
+              const fid = getFId(f); const fname = getFName(fid)
+              const on = presences.some(p => p.id === fid && isOnlineP(p))
+              const active = chatType === 'dm' && selFriend === fid
               return (
-                <button key={t} onClick={() => setTab(t)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold mb-1 relative"
-                  style={{ background: tab === t ? 'rgba(0,188,212,0.12)' : 'transparent', color: tab === t ? C.accent : C.muted }}>
-                  <span className="text-base">{icon}</span>
-                  <span>{label}</span>
-                  {badge > 0 && <span className="ml-auto w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center"
-                    style={{ background: '#f85149', color: 'white' }}>{badge}</span>}
+                <button key={f.id} onClick={() => openDm(fid)}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: active ? 'rgba(0,188,212,0.1)' : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 }}>
+                      {fname[0]?.toUpperCase()}
+                    </div>
+                    <span style={{ position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: '50%', background: on ? '#3fb950' : '#6e7681', border: '2px solid ' + CARD }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: active ? ACC : TXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fname}</p>
+                    <p style={{ fontSize: 11, color: on ? '#3fb950' : MUT }}>{on ? 'オンライン' : 'オフライン'}</p>
+                  </div>
                 </button>
               )
             })}
           </div>
-        </aside>
+        )}
 
-        {/* Main content */}
-        <main style={{ flex: 1, overflowY: 'auto', padding: '12px 12px 80px' }}
-          className="md:pb-4">
-
-          {/* ── 全体 ── */}
-          {tab === 'all' && <>
-            {/* Status + online + voice: mobile/tablet only */}
-            {!isDesktop && <>
-              {StatusSection}
-              {OnlineSection}
-              {VoiceSection}
-            </>}
-            <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-              <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
-                💬 全体チャット — サーバー{server}
-              </p>
-              <div className="overflow-y-auto flex flex-col gap-2 mb-3" style={{ height: isDesktop ? 'calc(100vh - 220px)' : 256 }}>
-                {globalMsgs.length === 0 && <p className="text-xs text-center py-8" style={{ color: C.muted }}>まだメッセージがないよ</p>}
-                {globalMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
-                <div ref={globalEndRef} />
-              </div>
-              <CInput value={globalInput} onChange={setGlobalInput} onSend={sendGlobal} />
-            </section>
-          </>}
-
-          {/* ── 友達 ── */}
-          {tab === 'friends' && <>
-            {selFriend ? <>
-              <button onClick={() => { setSelFriend(null); selFriendRef.current = null }}
-                className="text-sm mb-3 flex items-center gap-1" style={{ color: C.muted }}>← 戻る</button>
-              <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-                <p className="font-semibold text-sm mb-3" style={{ color: C.text }}>
-                  💬 {getFriendName(selFriend)} とのDM
-                </p>
-                <div className="overflow-y-auto flex flex-col gap-2 mb-3" style={{ height: isDesktop ? 'calc(100vh - 200px)' : 400 }}>
-                  {dmMsgs.length === 0 && <p className="text-xs text-center py-8" style={{ color: C.muted }}>まだメッセージがないよ</p>}
-                  {dmMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
-                  <div ref={dmEndRef} />
-                </div>
-                <CInput value={dmInput} onChange={setDmInput} onSend={sendDm} />
-              </section>
-            </> : <>
-              <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>友達を追加</p>
-                <div className="flex gap-2">
-                  <input value={addInput} onChange={e => { setAddInput(e.target.value); setAddError('') }}
-                    onKeyDown={e => e.key === 'Enter' && sendFriendReq()}
-                    placeholder="ユーザー名を入力" className="flex-1 rounded-lg px-3 py-2 text-sm outline-none"
-                    style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
-                  <button onClick={sendFriendReq} className="px-4 py-2 rounded-lg text-sm font-bold"
-                    style={{ background: C.accent, color: C.bg }}>送信</button>
-                </div>
-                {addError && <p className="text-xs mt-2" style={{ color: '#f85149' }}>{addError}</p>}
-              </section>
-
-              {pending.length > 0 && (
-                <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: '1px solid #f0883e' }}>
-                  <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: '#f0883e' }}>
-                    申請が届いてるよ ({pending.length})
-                  </p>
-                  {pending.map(f => (
-                    <div key={f.id} className="flex items-center justify-between py-2">
-                      <span className="text-sm" style={{ color: C.text }}>{getFriendName(f.requester_id)}</span>
-                      <div className="flex gap-2">
-                        <button onClick={() => acceptFriend(f.id)} className="text-xs px-3 py-1 rounded-lg font-bold"
-                          style={{ background: 'rgba(63,185,80,0.15)', color: '#3fb950', border: '1px solid rgba(63,185,80,0.4)' }}>承認</button>
-                        <button onClick={() => removeFriend(f.id)} className="text-xs px-3 py-1 rounded-lg"
-                          style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}>拒否</button>
-                      </div>
-                    </div>
-                  ))}
-                </section>
-              )}
-
-              <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
-                  友達 ({accepted.length})
-                </p>
-                {accepted.length === 0
-                  ? <p className="text-sm text-center py-6" style={{ color: C.muted }}>まだ友達がいないよ</p>
-                  : <div className="flex flex-col">{accepted.map(f => {
-                    const fid = getFriendId(f); const fname = getFriendName(fid)
-                    const on = presences.some(p => p.id === fid && isOnlineP(p))
-                    return (
-                      <div key={f.id} className="flex items-center justify-between py-3"
-                        style={{ borderBottom: `1px solid ${C.border}` }}>
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0"
-                            style={{ background: 'rgba(0,188,212,0.15)', color: C.accent }}>{fname[0]?.toUpperCase()}</div>
-                          <div>
-                            <p className="text-sm font-semibold" style={{ color: C.text }}>{fname}</p>
-                            <p className="text-xs" style={{ color: on ? '#3fb950' : C.muted }}>{on ? 'オンライン' : 'オフライン'}</p>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button onClick={() => openDm(fid)} className="text-xs px-3 py-1 rounded-lg"
-                            style={{ background: 'rgba(0,188,212,0.1)', color: C.accent, border: `1px solid rgba(0,188,212,0.3)` }}>DM</button>
-                          <button onClick={() => removeFriend(f.id)} className="text-xs px-3 py-1 rounded-lg"
-                            style={{ background: 'transparent', color: C.muted, border: `1px solid ${C.border}` }}>削除</button>
-                        </div>
-                      </div>
-                    )
-                  })}</div>
-                }
-              </section>
-            </>}
-          </>}
-
-          {/* ── グループ ── */}
-          {tab === 'groups' && <>
-            {selGroup ? <>
-              <button onClick={() => { setSelGroup(null); selGroupRef.current = null }}
-                className="text-sm mb-3 flex items-center gap-1" style={{ color: C.muted }}>← 戻る</button>
-              <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-                <p className="font-semibold text-sm mb-2" style={{ color: C.text }}>
-                  {groups.find(g => g.id === selGroup)?.name}
-                </p>
-                {groups.find(g => g.id === selGroup)?.owner_id === userIdRef.current && (
-                  <div className="mb-3">
-                    <div className="flex gap-2">
-                      <input value={inviteInput} onChange={e => { setInviteInput(e.target.value); setInviteError('') }}
-                        onKeyDown={e => e.key === 'Enter' && inviteToGroup()}
-                        placeholder="友達のユーザー名を招待" className="flex-1 rounded-lg px-3 py-1.5 text-xs outline-none"
-                        style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
-                      <button onClick={inviteToGroup} className="text-xs px-3 py-1.5 rounded-lg font-bold"
-                        style={{ background: C.accent, color: C.bg }}>招待</button>
-                    </div>
-                    {inviteError && <p className="text-xs mt-1" style={{ color: '#f85149' }}>{inviteError}</p>}
+        {/* ── グループ list ── */}
+        {tab === 'groups' && (
+          <div style={{ padding: 8 }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+              <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && createGroup()} placeholder="グループ名を作成"
+                style={{ flex: 1, background: BG, border: `1px solid ${BD}`, borderRadius: 8, padding: '8px 10px', color: TXT, fontSize: 12, outline: 'none' }} />
+              <button onClick={createGroup} style={{ background: ACC, color: BG, border: 'none', borderRadius: 8, padding: '0 12px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>作成</button>
+            </div>
+            <p style={{ fontSize: 10, fontWeight: 700, color: MUT, padding: '4px 4px 6px', textTransform: 'uppercase', letterSpacing: 1 }}>グループ — {groups.length}</p>
+            {groups.map(g => {
+              const active = chatType === 'group' && selGroup === g.id
+              return (
+                <button key={g.id} onClick={() => openGroup(g.id)}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: active ? 'rgba(0,188,212,0.1)' : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left', marginBottom: 2 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
+                    {g.name[0]?.toUpperCase()}
                   </div>
-                )}
-                <div className="overflow-y-auto flex flex-col gap-2 mb-3" style={{ height: isDesktop ? 'calc(100vh - 220px)' : 320 }}>
-                  {groupMsgs.length === 0 && <p className="text-xs text-center py-8" style={{ color: C.muted }}>まだメッセージがないよ</p>}
-                  {groupMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
-                  <div ref={groupEndRef} />
-                </div>
-                <CInput value={groupInput} onChange={setGroupInput} onSend={sendGroupMsg} />
-              </section>
-            </> : <>
-              <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>グループを作成</p>
-                <div className="flex gap-2">
-                  <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && createGroup()}
-                    placeholder="グループ名" className="flex-1 rounded-lg px-3 py-2 text-sm outline-none"
-                    style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
-                  <button onClick={createGroup} className="px-4 py-2 rounded-lg text-sm font-bold"
-                    style={{ background: C.accent, color: C.bg }}>作成</button>
-                </div>
-              </section>
-              <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
-                  グループ ({groups.length})
-                </p>
-                {groups.length === 0
-                  ? <p className="text-sm text-center py-6" style={{ color: C.muted }}>まだグループがないよ</p>
-                  : <div className="flex flex-col gap-2">{groups.map(g => (
-                    <button key={g.id} onClick={() => openGroup(g.id)}
-                      className="flex items-center gap-3 p-3 rounded-xl text-left w-full"
-                      style={{ background: C.bg, border: `1px solid ${C.border}` }}>
-                      <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
-                        style={{ background: 'rgba(0,188,212,0.15)', color: C.accent }}>{g.name[0]?.toUpperCase()}</div>
-                      <div>
-                        <p className="text-sm font-semibold" style={{ color: C.text }}>{g.name}</p>
-                        <p className="text-xs" style={{ color: C.muted }}>{groupMemCount[g.id] ?? 0}人</p>
-                      </div>
-                    </button>
-                  ))}</div>
-                }
-              </section>
-            </>}
-          </>}
-        </main>
-
-        {/* Right panel — desktop only */}
-        <aside className="hidden lg:flex flex-col overflow-y-auto"
-          style={{ width: 280, flexShrink: 0, padding: 12, background: C.bg, borderLeft: `1px solid ${C.border}` }}>
-          {StatusSection}
-          {OnlineSection}
-          {VoiceSection}
-        </aside>
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: active ? ACC : TXT }}>{g.name}</p>
+                    <p style={{ fontSize: 11, color: MUT }}>{groupMemCount[g.id] ?? 0}人</p>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
-      {/* Bottom nav — mobile only */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 flex z-20"
-        style={{ background: C.card, borderTop: `1px solid ${C.border}` }}>
-        {navItems.map(({ t, icon, label }) => {
-          const badge = t === 'friends' && pending.length > 0 ? pending.length : 0
-          return (
-            <button key={t} onClick={() => setTab(t)}
-              className="flex-1 flex flex-col items-center py-3 gap-0.5 relative"
-              style={{ color: tab === t ? C.accent : C.muted }}>
-              <span className="text-xl">{icon}</span>
-              <span className="text-[10px] font-semibold">{label}</span>
-              {badge > 0 && <span className="absolute top-1.5 right-[28%] w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center"
-                style={{ background: '#f85149', color: 'white' }}>{badge}</span>}
-            </button>
-          )
-        })}
-      </nav>
+      {/* Voice - bottom of list panel (desktop) */}
+      {isDesktop && (
+        <div style={{ borderTop: `1px solid ${BD}`, padding: 12, flexShrink: 0 }}>
+          <p style={{ fontSize: 10, fontWeight: 700, color: MUT, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>🎤 ボイス · サーバー{server}</p>
+          <VoiceChat key={server} userId={userIdRef.current} userName={userName} channel={`server-${server}`} presences={presences} />
+        </div>
+      )}
+
+      {/* User bar - bottom */}
+      <div style={{ borderTop: `1px solid ${BD}`, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, background: '#0d1117' }}>
+        <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(0,188,212,0.2)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13, flexShrink: 0 }}>
+          {userName[0]?.toUpperCase()}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, color: TXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{userName}</p>
+          <p style={{ fontSize: 11, color: '#3fb950' }}>オンライン</p>
+        </div>
+        <button onClick={handleLogout} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, opacity: 0.6 }} title="ログアウト">🚪</button>
+      </div>
     </div>
   )
-}
 
-function Bubble({ m, myId }: { m: Message; myId: string }) {
-  const me = m.user_id === myId
-  return (
-    <div className={`flex gap-2 ${me ? 'flex-row-reverse' : ''}`}>
-      <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-        style={{ background: me ? 'rgba(0,188,212,0.2)' : '#30363d', color: me ? '#00bcd4' : '#8b949e' }}>
-        {m.user_name[0]?.toUpperCase()}
+  // ── Chat area ────────────────────────────────────────────
+  const ChatArea = (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Chat header */}
+      <div style={{ padding: '12px 16px', borderBottom: `1px solid ${BD}`, display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, background: CARD }}>
+        {!isDesktop && (
+          <button onClick={() => { setSelFriend(null); selFriendRef.current = null; setSelGroup(null); selGroupRef.current = null }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: MUT, fontSize: 18, paddingRight: 4 }}>‹</button>
+        )}
+        <p style={{ fontWeight: 700, fontSize: 14, color: TXT }}>{chatTitle}</p>
+
+        {/* Group invite (header) */}
+        {chatType === 'group' && selGroup && groups.find(g => g.id === selGroup)?.owner_id === userIdRef.current && isDesktop && (
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <input value={inviteInput} onChange={e => { setInviteInput(e.target.value); setInviteError('') }}
+              onKeyDown={e => e.key === 'Enter' && inviteToGroup()} placeholder="友達を招待"
+              style={{ background: BG, border: `1px solid ${BD}`, borderRadius: 8, padding: '5px 10px', color: TXT, fontSize: 12, outline: 'none', width: 140 }} />
+            <button onClick={inviteToGroup} style={{ background: ACC, color: BG, border: 'none', borderRadius: 8, padding: '5px 12px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>招待</button>
+            {inviteError && <span style={{ fontSize: 11, color: '#f85149', alignSelf: 'center' }}>{inviteError}</span>}
+          </div>
+        )}
       </div>
-      <div className={`max-w-[75%] flex flex-col gap-0.5 ${me ? 'items-end' : 'items-start'}`}>
-        <span className="text-[10px] px-1" style={{ color: '#8b949e' }}>{m.user_name}</span>
-        <div className="px-3 py-2 rounded-2xl text-sm break-words"
-          style={me ? { background: '#00bcd4', color: '#0d1117', borderTopRightRadius: 4 }
-                   : { background: '#0d1117', color: '#e6edf3', border: '1px solid #30363d', borderTopLeftRadius: 4 }}>
-          {m.content}
+
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {chatType === 'global' && <>
+          {globalMsgs.length === 0 && <p style={{ textAlign: 'center', color: MUT, fontSize: 12, paddingTop: 32 }}>まだメッセージがないよ</p>}
+          {globalMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
+          <div ref={globalEndRef} />
+        </>}
+        {chatType === 'dm' && <>
+          {dmMsgs.length === 0 && <p style={{ textAlign: 'center', color: MUT, fontSize: 12, paddingTop: 32 }}>まだメッセージがないよ</p>}
+          {dmMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
+          <div ref={dmEndRef} />
+        </>}
+        {chatType === 'group' && <>
+          {groupMsgs.length === 0 && <p style={{ textAlign: 'center', color: MUT, fontSize: 12, paddingTop: 32 }}>まだメッセージがないよ</p>}
+          {groupMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
+          <div ref={groupEndRef} />
+        </>}
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: '0 16px 16px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 8, background: '#21262d', borderRadius: 12, padding: '4px 4px 4px 16px', alignItems: 'center' }}>
+          <input
+            value={chatType === 'global' ? globalInput : chatType === 'dm' ? dmInput : groupInput}
+            onChange={e => chatType === 'global' ? setGlobalInput(e.target.value) : chatType === 'dm' ? setDmInput(e.target.value) : setGroupInput(e.target.value)}
+            onKeyDown={e => { if (e.key !== 'Enter' || e.shiftKey) return; chatType === 'global' ? sendGlobal() : chatType === 'dm' ? sendDm() : sendGroupMsg() }}
+            placeholder={`${chatTitle} にメッセージを送信`}
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: TXT, fontSize: 14, padding: '8px 0' }} />
+          <button onClick={chatType === 'global' ? sendGlobal : chatType === 'dm' ? sendDm : sendGroupMsg}
+            style={{ background: ACC, color: BG, border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>
+            送信
+          </button>
         </div>
       </div>
     </div>
   )
+
+  // ── Status panel (right side on mobile 全体 tab) ──────────
+  const StatusPanel = (
+    <div style={{ padding: '12px 16px', borderBottom: `1px solid ${BD}`, background: CARD, flexShrink: 0 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <input value={gameInput} onChange={e => setGameInput(e.target.value)} placeholder="ゲーム名"
+          style={{ flex: 1, background: BG, border: `1px solid ${BD}`, borderRadius: 8, padding: '7px 10px', color: TXT, fontSize: 12, outline: 'none' }} />
+        <input value={statusInput} onChange={e => setStatusInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && upsert()} placeholder="今何してる？"
+          style={{ flex: 2, background: BG, border: `1px solid ${BD}`, borderRadius: 8, padding: '7px 10px', color: TXT, fontSize: 12, outline: 'none' }} />
+        <button onClick={() => upsert()} style={{ background: ACC, color: BG, border: 'none', borderRadius: 8, padding: '0 12px', fontWeight: 700, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>更新</button>
+        <button onClick={() => { const n = !recruiting; setRecruiting(n); upsert({ recruiting: n }) }}
+          style={{ background: recruiting ? 'rgba(63,185,80,0.15)' : 'transparent', color: recruiting ? '#3fb950' : MUT, border: `1px solid ${recruiting ? '#3fb950' : BD}`, borderRadius: 8, padding: '0 10px', fontSize: 12, cursor: 'pointer', flexShrink: 0, fontWeight: 600 }}>
+          {recruiting ? '✋募集中' : '募集'}
+        </button>
+      </div>
+    </div>
+  )
+
+  // ── DESKTOP layout ────────────────────────────────────────
+  if (isDesktop) return (
+    <div style={{ height: '100dvh', display: 'flex', background: BG }}>
+
+      {/* Icon sidebar */}
+      <div style={{ width: 60, background: SIDE, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', gap: 6, borderRight: `1px solid ${BD}`, flexShrink: 0 }}>
+        {/* Servers */}
+        {[1,2,3,4,5].map(s => (
+          <button key={s} onClick={() => changeServer(s)} title={`サーバー${s}`}
+            style={{ position: 'relative', width: 42, height: 42, borderRadius: server === s ? 14 : '50%', background: server === s ? ACC : CARD, color: server === s ? BG : MUT, fontWeight: 700, fontSize: 15, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'border-radius 0.15s' }}>
+            {s}
+            {server === s && <span style={{ position: 'absolute', left: -10, top: '50%', transform: 'translateY(-50%)', width: 4, height: 28, borderRadius: '0 3px 3px 0', background: 'white' }} />}
+          </button>
+        ))}
+
+        {/* Divider */}
+        <div style={{ width: 30, height: 2, borderRadius: 1, background: BD, margin: '2px 0' }} />
+
+        {/* Nav icons */}
+        {([['all','🌐','全体'],['friends','👥','友達'],['groups','💬','グループ']] as [Tab,string,string][]).map(([t, icon, label]) => {
+          const badge = t === 'friends' && pending.length > 0 ? pending.length : 0
+          return (
+            <button key={t} onClick={() => setTab(t)} title={label}
+              style={{ position: 'relative', width: 42, height: 42, borderRadius: tab === t ? 14 : '50%', background: tab === t ? 'rgba(0,188,212,0.2)' : CARD, border: 'none', cursor: 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'border-radius 0.15s' }}>
+              {icon}
+              {badge > 0 && <span style={{ position: 'absolute', top: -2, right: -2, width: 16, height: 16, borderRadius: '50%', background: '#f85149', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{badge}</span>}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* List panel */}
+      {ListPanel}
+
+      {/* Main: status bar + chat */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {StatusPanel}
+        {ChatArea}
+      </div>
+    </div>
+  )
+
+  // ── MOBILE layout ─────────────────────────────────────────
+  const showList = chatType === 'global' || (chatType === 'dm' && !selFriend) || (chatType === 'group' && !selGroup) || (tab === 'friends' && chatType !== 'dm') || (tab === 'groups' && chatType !== 'group')
+  const inChat = (chatType === 'dm' && !!selFriend) || (chatType === 'group' && !!selGroup)
+
+  return (
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', background: BG }}>
+      {/* Mobile header */}
+      <div style={{ background: CARD, borderBottom: `1px solid ${BD}`, flexShrink: 0, zIndex: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px 8px' }}>
+          <span style={{ fontWeight: 700, color: ACC, fontSize: 16 }}>🎮 ゲーム友達</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: '#3fb950', fontSize: 12 }}>● {userName}</span>
+            <button onClick={handleLogout} style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}>ログアウト</button>
+          </div>
+        </div>
+        {/* Mobile server tabs */}
+        <div style={{ display: 'flex', gap: 6, padding: '0 12px 10px' }}>
+          {[1,2,3,4,5].map(s => (
+            <button key={s} onClick={() => changeServer(s)}
+              style={{ flex: 1, padding: '6px 0', borderRadius: 8, background: server === s ? ACC : 'transparent', color: server === s ? BG : MUT, border: `1px solid ${server === s ? ACC : BD}`, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+              {s}
+            </button>
+          ))}
+        </div>
+        {/* Mobile status bar */}
+        {!inChat && tab === 'all' && (
+          <div style={{ padding: '0 12px 10px', display: 'flex', gap: 6 }}>
+            <input value={gameInput} onChange={e => setGameInput(e.target.value)} placeholder="ゲーム"
+              style={{ flex: 1, background: BG, border: `1px solid ${BD}`, borderRadius: 8, padding: '6px 8px', color: TXT, fontSize: 12, outline: 'none' }} />
+            <input value={statusInput} onChange={e => setStatusInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && upsert()} placeholder="今何してる？"
+              style={{ flex: 2, background: BG, border: `1px solid ${BD}`, borderRadius: 8, padding: '6px 8px', color: TXT, fontSize: 12, outline: 'none' }} />
+            <button onClick={() => upsert()} style={{ background: ACC, color: BG, border: 'none', borderRadius: 8, padding: '6px 10px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>更新</button>
+          </div>
+        )}
+      </div>
+
+      {/* Mobile body */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+        {inChat ? ChatArea : (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {tab === 'all' && (
+              <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 70 }}>
+                {/* Global chat button */}
+                <div style={{ padding: '8px 12px 0' }}>
+                  <button onClick={() => setChatType('global')}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderRadius: 12, background: CARD, border: `1px solid ${BD}`, cursor: 'pointer', marginBottom: 8 }}>
+                    <span style={{ fontSize: 24 }}>💬</span>
+                    <div style={{ textAlign: 'left' }}>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: TXT }}>全体チャット</p>
+                      <p style={{ fontSize: 11, color: MUT }}>サーバー{server}の全体</p>
+                    </div>
+                  </button>
+                </div>
+                {/* Voice */}
+                <div style={{ padding: '0 12px 8px' }}>
+                  <div style={{ background: CARD, border: `1px solid ${BD}`, borderRadius: 12, padding: '12px 16px' }}>
+                    <p style={{ fontSize: 11, fontWeight: 700, color: MUT, textTransform: 'uppercase', marginBottom: 8 }}>🎤 ボイス · サーバー{server}</p>
+                    <VoiceChat key={server} userId={userIdRef.current} userName={userName} channel={`server-${server}`} presences={presences} />
+                  </div>
+                </div>
+                {/* Online */}
+                <div style={{ padding: '0 12px' }}>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: MUT, textTransform: 'uppercase', marginBottom: 8 }}>オンライン — {online.length}</p>
+                  {online.map(p => (
+                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderRadius: 12, background: CARD, border: `1px solid ${p.recruiting ? '#3fb950' : BD}`, marginBottom: 6 }}>
+                      <div style={{ position: 'relative', flexShrink: 0 }}>
+                        <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15 }}>{p.name[0]?.toUpperCase()}</div>
+                        <span style={{ position: 'absolute', bottom: 0, right: 0, width: 11, height: 11, borderRadius: '50%', background: '#3fb950', border: '2px solid ' + CARD }} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 14, fontWeight: 600, color: TXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</p>
+                        <p style={{ fontSize: 12, color: MUT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.game ? `${p.game} · ` : ''}{p.status || 'オンライン'}</p>
+                      </div>
+                      {p.recruiting && <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 10, background: 'rgba(63,185,80,0.15)', color: '#3fb950' }}>募集中</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {tab !== 'all' && (
+              <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 70 }}>
+                {/* Friends/Groups - reuse ListPanel logic inline */}
+                {React.createElement(() => <>{tab === 'friends' || tab === 'groups' ? <div style={{ paddingTop: 4 }}>{ListPanel}</div> : null}</>)}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Mobile bottom nav */}
+      {!inChat && (
+        <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, display: 'flex', background: CARD, borderTop: `1px solid ${BD}`, zIndex: 20 }}>
+          {([['all','🌐','全体'],['friends','👥','友達'],['groups','💬','グループ']] as [Tab,string,string][]).map(([t, icon, label]) => {
+            const badge = t === 'friends' && pending.length > 0 ? pending.length : 0
+            return (
+              <button key={t} onClick={() => { setTab(t); if (t === 'all') setChatType('global') }}
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0 6px', gap: 2, background: 'none', border: 'none', cursor: 'pointer', position: 'relative', color: tab === t ? ACC : MUT }}>
+                <span style={{ fontSize: 22 }}>{icon}</span>
+                <span style={{ fontSize: 10, fontWeight: 600 }}>{label}</span>
+                {badge > 0 && <span style={{ position: 'absolute', top: 6, right: '28%', width: 16, height: 16, borderRadius: '50%', background: '#f85149', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{badge}</span>}
+              </button>
+            )
+          })}
+        </nav>
+      )}
+    </div>
+  )
 }
 
-function CInput({ value, onChange, onSend }: { value: string; onChange: (v: string) => void; onSend: () => void }) {
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const React = require('react')
+
+function Bubble({ m, myId }: { m: Message; myId: string }) {
+  const me = m.user_id === myId
   return (
-    <div className="flex gap-2">
-      <input value={value} onChange={e => onChange(e.target.value)}
-        onKeyDown={e => e.key === 'Enter' && !e.shiftKey && onSend()}
-        placeholder="メッセージを入力..."
-        className="flex-1 rounded-xl px-4 py-2 text-sm outline-none"
-        style={{ background: '#0d1117', border: '1px solid #30363d', color: '#e6edf3' }} />
-      <button onClick={onSend} disabled={!value.trim()}
-        className="font-bold px-4 rounded-xl text-sm shrink-0 disabled:opacity-40"
-        style={{ background: '#00bcd4', color: '#0d1117' }}>送信</button>
+    <div style={{ display: 'flex', gap: 8, flexDirection: me ? 'row-reverse' : 'row' }}>
+      <div style={{ width: 28, height: 28, borderRadius: '50%', background: me ? 'rgba(0,188,212,0.2)' : '#30363d', color: me ? ACC : MUT, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+        {m.user_name[0]?.toUpperCase()}
+      </div>
+      <div style={{ maxWidth: '75%', display: 'flex', flexDirection: 'column', gap: 2, alignItems: me ? 'flex-end' : 'flex-start' }}>
+        <span style={{ fontSize: 10, color: MUT, padding: '0 4px' }}>{m.user_name}</span>
+        <div style={{ padding: '8px 12px', borderRadius: 16, fontSize: 13, wordBreak: 'break-word', ...(me ? { background: ACC, color: BG, borderTopRightRadius: 4 } : { background: '#21262d', color: TXT, borderTopLeftRadius: 4 }) }}>
+          {m.content}
+        </div>
+      </div>
     </div>
   )
 }
