@@ -38,6 +38,7 @@ export default function Page() {
   const [userName, setUserName]   = useState('')
   const [tab, setTab]             = useState<Tab>('all')
   const [server, setServer]       = useState(1)
+  const [isDesktop, setIsDesktop] = useState(false)
 
   const [statusInput, setStatusInput] = useState('')
   const [gameInput, setGameInput]     = useState('')
@@ -75,13 +76,19 @@ export default function Page() {
   const groupEndRef  = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const uid  = initUserId()
+    const uid = initUserId()
     userIdRef.current = uid
     const name = localStorage.getItem('gf_name') ?? ''
     if (name) { userNameRef.current = name; setUserName(name); setReady(true) }
   }, [])
 
-  // マイク権限を事前に取得（毎回ポップアップが出ないように）
+  useEffect(() => {
+    const check = () => setIsDesktop(window.innerWidth >= 1024)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+
   useEffect(() => {
     if (!ready) return
     navigator.mediaDevices?.getUserMedia({ audio: true }).catch(() => {})
@@ -145,7 +152,6 @@ export default function Page() {
     if (!ready) return
     const uid = userIdRef.current
     const ago = new Date(Date.now() - ONLINE_MS).toISOString()
-
     supabase.from('presences').select('*').gt('updated_at', ago)
       .then(({ data }) => { if (data) setPresences(data) })
     loadGlobalMsgs(1)
@@ -186,7 +192,6 @@ export default function Page() {
 
     upsert()
     timerRef.current = setInterval(() => upsert(), 60_000)
-
     return () => {
       pSub.unsubscribe(); mSub.unsubscribe(); fSub.unsubscribe()
       if (timerRef.current) clearInterval(timerRef.current)
@@ -194,11 +199,8 @@ export default function Page() {
   }, [ready, loadFriends, loadGroups, loadGlobalMsgs, upsert])
 
   const changeServer = (s: number) => {
-    setServer(s)
-    serverRef.current = s
-    setGlobalMsgs([])
-    loadGlobalMsgs(s)
-    upsert()
+    setServer(s); serverRef.current = s
+    setGlobalMsgs([]); loadGlobalMsgs(s); upsert()
   }
 
   const handleSetup = async () => {
@@ -215,14 +217,12 @@ export default function Page() {
   }
 
   const handleLogout = () => {
-    localStorage.removeItem('gf_name')
-    userNameRef.current = ''
+    localStorage.removeItem('gf_name'); userNameRef.current = ''
     if (timerRef.current) clearInterval(timerRef.current)
     setUserName(''); setNameInput(''); setReady(false)
     setSelFriend(null); selFriendRef.current = null
-    setSelGroup(null);  selGroupRef.current  = null
-    setServer(1); serverRef.current = 1
-    setTab('all')
+    setSelGroup(null); selGroupRef.current = null
+    setServer(1); serverRef.current = 1; setTab('all')
   }
 
   const sendGlobal = async () => {
@@ -236,8 +236,7 @@ export default function Page() {
   }
 
   const sendFriendReq = async () => {
-    const target = addInput.trim()
-    if (!target) return
+    const target = addInput.trim(); if (!target) return
     setAddError('')
     const uid = userIdRef.current
     if (target === userNameRef.current) { setAddError('自分には送れないよ'); return }
@@ -251,16 +250,12 @@ export default function Page() {
   }
 
   const acceptFriend = async (id: string) => {
-    await supabase.from('friendships').update({ status: 'accepted' }).eq('id', id)
-    loadFriends()
+    await supabase.from('friendships').update({ status: 'accepted' }).eq('id', id); loadFriends()
   }
-
   const removeFriend = async (id: string) => {
     await supabase.from('friendships').delete().eq('id', id)
-    setSelFriend(null); selFriendRef.current = null
-    loadFriends()
+    setSelFriend(null); selFriendRef.current = null; loadFriends()
   }
-
   const openDm = async (fuid: string) => {
     setSelFriend(fuid); selFriendRef.current = fuid
     const uid = userIdRef.current
@@ -269,45 +264,33 @@ export default function Page() {
       .order('created_at').limit(100)
     if (data) setDmMsgs(data)
   }
-
   const sendDm = async () => {
-    const txt = moderate(dmInput.trim())
-    if (!txt || !selFriend) return
+    const txt = moderate(dmInput.trim()); if (!txt || !selFriend) return
     await supabase.from('messages').insert({
       user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: selFriend,
-    })
-    setDmInput('')
+    }); setDmInput('')
   }
-
   const createGroup = async () => {
-    const name = newGroupName.trim()
-    if (!name) return
+    const name = newGroupName.trim(); if (!name) return
     const uid = userIdRef.current
     const { data } = await supabase.from('groups').insert({ name, owner_id: uid }).select().single()
     if (!data) return
     await supabase.from('group_members').insert({ group_id: data.id, user_id: uid })
     setNewGroupName(''); loadGroups()
   }
-
   const openGroup = async (gid: string) => {
     setSelGroup(gid); selGroupRef.current = gid
-    const { data } = await supabase.from('messages').select('*')
-      .eq('group_id', gid).order('created_at').limit(100)
+    const { data } = await supabase.from('messages').select('*').eq('group_id', gid).order('created_at').limit(100)
     if (data) setGroupMsgs(data)
   }
-
   const sendGroupMsg = async () => {
-    const txt = moderate(groupInput.trim())
-    if (!txt || !selGroup) return
+    const txt = moderate(groupInput.trim()); if (!txt || !selGroup) return
     await supabase.from('messages').insert({
       user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: selGroup,
-    })
-    setGroupInput('')
+    }); setGroupInput('')
   }
-
   const inviteToGroup = async () => {
-    const target = inviteInput.trim()
-    if (!target || !selGroup) return
+    const target = inviteInput.trim(); if (!target || !selGroup) return
     setInviteError('')
     const { data: tu } = await supabase.from('users').select('*').eq('username', target).single()
     if (!tu) { setInviteError('ユーザーが見つかりません'); return }
@@ -320,12 +303,11 @@ export default function Page() {
 
   const getFriendId   = (f: Friendship) => f.requester_id === userIdRef.current ? f.addressee_id : f.requester_id
   const getFriendName = (id: string) => friendUsers[id]?.username ?? '...'
-
-  const online   = presences.filter(p => p.id !== userIdRef.current && isOnlineP(p) && p.server === server)
+  const online  = presences.filter(p => p.id !== userIdRef.current && isOnlineP(p) && p.server === server)
   const pending  = friends.filter(f => f.status === 'pending' && f.addressee_id === userIdRef.current)
   const accepted = friends.filter(f => f.status === 'accepted')
 
-  // ── Setup screen ──────────────────────────────────────────
+  // ── Setup ────────────────────────────────────────────────
   if (!ready) return (
     <div className="min-h-screen flex items-center justify-center px-4" style={{ background: C.bg }}>
       <div className="w-full max-w-sm rounded-2xl p-8" style={{ background: C.card, border: `1px solid ${C.border}` }}>
@@ -344,282 +326,337 @@ export default function Page() {
     </div>
   )
 
-  // ── Main screen ───────────────────────────────────────────
+  // ── Shared UI blocks ──────────────────────────────────────
+  const StatusSection = (
+    <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+      <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>自分のステータス</p>
+      <input value={gameInput} onChange={e => setGameInput(e.target.value)}
+        placeholder="ゲーム名" className="w-full rounded-lg px-3 py-2 text-sm mb-2 outline-none"
+        style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
+      <input value={statusInput} onChange={e => setStatusInput(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && upsert()}
+        placeholder="今何してる？" className="w-full rounded-lg px-3 py-2 text-sm mb-3 outline-none"
+        style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
+      <div className="flex gap-2">
+        <button onClick={() => upsert()} className="flex-1 font-bold py-2 rounded-lg text-sm"
+          style={{ background: C.accent, color: C.bg }}>更新</button>
+        <button onClick={() => { const n = !recruiting; setRecruiting(n); upsert({ recruiting: n }) }}
+          className="flex-1 font-bold py-2 rounded-lg text-sm"
+          style={{ background: recruiting ? 'rgba(63,185,80,0.15)' : 'transparent', border: `1px solid ${recruiting ? '#3fb950' : C.border}`, color: recruiting ? '#3fb950' : C.muted }}>
+          {recruiting ? '✋ 募集中！' : '一緒に募集'}
+        </button>
+      </div>
+    </section>
+  )
+
+  const OnlineSection = (
+    <section className="mb-3">
+      <p className="text-xs font-semibold uppercase tracking-wide mb-2 px-1" style={{ color: C.muted }}>
+        オンライン {online.length > 0 && `(${online.length})`}
+      </p>
+      {online.length === 0
+        ? <p className="text-sm p-3 rounded-xl" style={{ background: C.card, border: `1px solid ${C.border}`, color: C.muted }}>まだ誰もいないよ</p>
+        : <div className="flex flex-col gap-2">{online.map(p => (
+          <div key={p.id} className="rounded-xl p-3 flex items-center gap-3"
+            style={{ background: C.card, border: `1px solid ${p.recruiting ? '#3fb950' : C.border}` }}>
+            <div className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
+              style={{ background: 'rgba(0,188,212,0.15)', color: C.accent }}>{p.name[0]?.toUpperCase()}</div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="font-semibold text-sm truncate" style={{ color: C.text }}>{p.name}</span>
+                {p.recruiting && <span className="text-xs px-1.5 py-0.5 rounded-full shrink-0"
+                  style={{ background: 'rgba(63,185,80,0.15)', color: '#3fb950' }}>募集中</span>}
+              </div>
+              <p className="text-xs truncate" style={{ color: C.muted }}>
+                {p.game && <span style={{ color: C.accent }}>{p.game} · </span>}{p.status || 'オンライン'}
+              </p>
+            </div>
+          </div>
+        ))}</div>
+      }
+    </section>
+  )
+
+  const VoiceSection = (
+    <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+      <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
+        🎤 ボイス — サーバー{server}
+      </p>
+      <VoiceChat key={server} userId={userIdRef.current} userName={userName}
+        channel={`server-${server}`} presences={presences} />
+    </section>
+  )
+
+  const navItems: { t: Tab; icon: string; label: string }[] = [
+    { t: 'all', icon: '🌐', label: '全体' },
+    { t: 'friends', icon: '👥', label: '友達' },
+    { t: 'groups', icon: '💬', label: 'グループ' },
+  ]
+
+  // ── Main app ──────────────────────────────────────────────
   return (
-    <div className="flex flex-col" style={{ background: C.bg, minHeight: '100dvh', maxWidth: 480, margin: '0 auto' }}>
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', background: C.bg }}>
 
       {/* Header */}
-      <div className="sticky top-0 z-20" style={{ background: C.card, borderBottom: `1px solid ${C.border}` }}>
+      <header style={{ flexShrink: 0, background: C.card, borderBottom: `1px solid ${C.border}`, zIndex: 20 }}>
         <div className="flex items-center justify-between px-4 py-3">
-          <span className="font-bold" style={{ color: C.accent }}>🎮 ゲーム友達</span>
+          <span className="font-bold text-base" style={{ color: C.accent }}>🎮 ゲーム友達</span>
           <div className="flex items-center gap-3">
-            <span className="text-sm" style={{ color: C.muted }}>
+            <span className="text-sm hidden sm:block" style={{ color: C.muted }}>
               <span style={{ color: '#3fb950' }}>●</span> {userName}
             </span>
+            <span className="text-sm sm:hidden" style={{ color: '#3fb950' }}>●</span>
             <button onClick={handleLogout} className="text-xs px-3 py-1 rounded-lg"
               style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}>
               ログアウト
             </button>
           </div>
         </div>
-
-        {/* Server tabs */}
-        <div className="flex px-3 pb-2 gap-1.5">
-          {[1, 2, 3, 4, 5].map(s => (
+        {/* Mobile server tabs */}
+        <div className="flex px-3 pb-2 gap-1.5 lg:hidden">
+          {[1,2,3,4,5].map(s => (
             <button key={s} onClick={() => changeServer(s)}
-              className="flex-1 py-1.5 rounded-lg text-xs font-bold transition"
-              style={{
-                background: server === s ? C.accent : 'transparent',
-                color:      server === s ? C.bg : C.muted,
-                border:    `1px solid ${server === s ? C.accent : C.border}`,
-              }}>
-              サーバー{s}
+              className="flex-1 py-1.5 rounded-lg text-xs font-bold"
+              style={{ background: server === s ? C.accent : 'transparent', color: server === s ? C.bg : C.muted, border: `1px solid ${server === s ? C.accent : C.border}` }}>
+              {s}
             </button>
           ))}
         </div>
-      </div>
+      </header>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-20">
+      {/* Body */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
 
-        {/* ── 全体 ── */}
-        {tab === 'all' && <>
-          <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-            <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>自分のステータス</p>
-            <input value={gameInput} onChange={e => setGameInput(e.target.value)}
-              placeholder="ゲーム名" className="w-full rounded-lg px-3 py-2 text-sm mb-2 outline-none"
-              style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
-            <input value={statusInput} onChange={e => setStatusInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && upsert()}
-              placeholder="今何してる？" className="w-full rounded-lg px-3 py-2 text-sm mb-3 outline-none"
-              style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
-            <div className="flex gap-2">
-              <button onClick={() => upsert()} className="flex-1 font-bold py-2 rounded-lg text-sm"
-                style={{ background: C.accent, color: C.bg }}>更新</button>
-              <button onClick={() => { const n = !recruiting; setRecruiting(n); upsert({ recruiting: n }) }}
-                className="flex-1 font-bold py-2 rounded-lg text-sm"
-                style={{ background: recruiting ? 'rgba(63,185,80,0.15)' : 'transparent', border: `1px solid ${recruiting ? '#3fb950' : C.border}`, color: recruiting ? '#3fb950' : C.muted }}>
-                {recruiting ? '✋ 募集中！' : '一緒に募集'}
+        {/* Left sidebar — md+ */}
+        <aside className="hidden md:flex flex-col overflow-y-auto"
+          style={{ width: 220, flexShrink: 0, background: C.card, borderRight: `1px solid ${C.border}` }}>
+          <div className="p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide mb-2 px-1" style={{ color: C.muted }}>サーバー</p>
+            {[1,2,3,4,5].map(s => (
+              <button key={s} onClick={() => changeServer(s)}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold mb-1"
+                style={{ background: server === s ? 'rgba(0,188,212,0.12)' : 'transparent', color: server === s ? C.accent : C.muted }}>
+                <span className="w-5 h-5 rounded flex items-center justify-center text-xs font-bold"
+                  style={{ background: server === s ? C.accent : C.border, color: server === s ? C.bg : C.muted }}>
+                  {s}
+                </span>
+                サーバー{s}
               </button>
-            </div>
-          </section>
+            ))}
+          </div>
+          <div className="p-3" style={{ borderTop: `1px solid ${C.border}` }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wide mb-2 px-1" style={{ color: C.muted }}>メニュー</p>
+            {navItems.map(({ t, icon, label }) => {
+              const badge = t === 'friends' && pending.length > 0 ? pending.length : 0
+              return (
+                <button key={t} onClick={() => setTab(t)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold mb-1 relative"
+                  style={{ background: tab === t ? 'rgba(0,188,212,0.12)' : 'transparent', color: tab === t ? C.accent : C.muted }}>
+                  <span className="text-base">{icon}</span>
+                  <span>{label}</span>
+                  {badge > 0 && <span className="ml-auto w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center"
+                    style={{ background: '#f85149', color: 'white' }}>{badge}</span>}
+                </button>
+              )
+            })}
+          </div>
+        </aside>
 
-          <p className="text-xs font-semibold uppercase tracking-wide mb-2 px-1" style={{ color: C.muted }}>
-            オンライン {online.length > 0 && `(${online.length})`}
-          </p>
-          {online.length === 0
-            ? <p className="text-sm p-4 rounded-xl mb-3" style={{ background: C.card, border: `1px solid ${C.border}`, color: C.muted }}>まだ誰もいないよ！URLを友達に送ろう</p>
-            : <div className="flex flex-col gap-2 mb-3">{online.map(p => (
-              <div key={p.id} className="rounded-xl p-3 flex items-center gap-3"
-                style={{ background: C.card, border: `1px solid ${p.recruiting ? '#3fb950' : C.border}` }}>
-                <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
-                  style={{ background: 'rgba(0,188,212,0.15)', color: C.accent }}>{p.name[0]?.toUpperCase()}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-semibold text-sm truncate" style={{ color: C.text }}>{p.name}</span>
-                    {p.recruiting && <span className="text-xs px-2 py-0.5 rounded-full shrink-0"
-                      style={{ background: 'rgba(63,185,80,0.15)', color: '#3fb950' }}>募集中</span>}
-                  </div>
-                  <p className="text-xs truncate" style={{ color: C.muted }}>
-                    {p.game && <span style={{ color: C.accent }}>{p.game} · </span>}{p.status || 'オンライン'}
-                  </p>
-                </div>
-              </div>
-            ))}</div>
-          }
+        {/* Main content */}
+        <main style={{ flex: 1, overflowY: 'auto', padding: '12px 12px 80px' }}
+          className="md:pb-4">
 
-          <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-            <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
-              🎤 ボイスチャット — サーバー{server}
-            </p>
-            <VoiceChat
-              key={server}
-              userId={userIdRef.current}
-              userName={userName}
-              channel={`server-${server}`}
-              presences={presences}
-            />
-          </section>
-
-          <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-            <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
-              💬 全体チャット — サーバー{server}
-            </p>
-            <div className="h-64 overflow-y-auto flex flex-col gap-2 mb-3">
-              {globalMsgs.length === 0 && <p className="text-xs text-center py-8" style={{ color: C.muted }}>まだメッセージがないよ</p>}
-              {globalMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
-              <div ref={globalEndRef} />
-            </div>
-            <CInput value={globalInput} onChange={setGlobalInput} onSend={sendGlobal} />
-          </section>
-        </>}
-
-        {/* ── 友達 ── */}
-        {tab === 'friends' && <>
-          {selFriend ? <>
-            <button onClick={() => { setSelFriend(null); selFriendRef.current = null }}
-              className="text-sm mb-3 flex items-center gap-1" style={{ color: C.muted }}>← 戻る</button>
-            <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-              <p className="font-semibold text-sm mb-3" style={{ color: C.text }}>
-                💬 {getFriendName(selFriend)} とのDM
-              </p>
-              <div className="h-[420px] overflow-y-auto flex flex-col gap-2 mb-3">
-                {dmMsgs.length === 0 && <p className="text-xs text-center py-8" style={{ color: C.muted }}>まだメッセージがないよ</p>}
-                {dmMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
-                <div ref={dmEndRef} />
-              </div>
-              <CInput value={dmInput} onChange={setDmInput} onSend={sendDm} />
-            </section>
-          </> : <>
-            <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-              <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>友達を追加</p>
-              <div className="flex gap-2">
-                <input value={addInput} onChange={e => { setAddInput(e.target.value); setAddError('') }}
-                  onKeyDown={e => e.key === 'Enter' && sendFriendReq()}
-                  placeholder="ユーザー名を入力" className="flex-1 rounded-lg px-3 py-2 text-sm outline-none"
-                  style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
-                <button onClick={sendFriendReq} className="px-4 py-2 rounded-lg text-sm font-bold"
-                  style={{ background: C.accent, color: C.bg }}>送信</button>
-              </div>
-              {addError && <p className="text-xs mt-2" style={{ color: '#f85149' }}>{addError}</p>}
-            </section>
-
-            {pending.length > 0 && (
-              <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: '1px solid #f0883e' }}>
-                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: '#f0883e' }}>
-                  申請が届いてるよ ({pending.length})
-                </p>
-                {pending.map(f => (
-                  <div key={f.id} className="flex items-center justify-between py-2">
-                    <span className="text-sm" style={{ color: C.text }}>{getFriendName(f.requester_id)}</span>
-                    <div className="flex gap-2">
-                      <button onClick={() => acceptFriend(f.id)} className="text-xs px-3 py-1 rounded-lg font-bold"
-                        style={{ background: 'rgba(63,185,80,0.15)', color: '#3fb950', border: '1px solid rgba(63,185,80,0.4)' }}>承認</button>
-                      <button onClick={() => removeFriend(f.id)} className="text-xs px-3 py-1 rounded-lg"
-                        style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}>拒否</button>
-                    </div>
-                  </div>
-                ))}
-              </section>
-            )}
-
+          {/* ── 全体 ── */}
+          {tab === 'all' && <>
+            {/* Status + online + voice: mobile/tablet only */}
+            {!isDesktop && <>
+              {StatusSection}
+              {OnlineSection}
+              {VoiceSection}
+            </>}
             <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
               <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
-                友達 ({accepted.length})
+                💬 全体チャット — サーバー{server}
               </p>
-              {accepted.length === 0
-                ? <p className="text-sm text-center py-6" style={{ color: C.muted }}>まだ友達がいないよ</p>
-                : <div className="flex flex-col">{accepted.map(f => {
-                  const fid   = getFriendId(f)
-                  const fname = getFriendName(fid)
-                  const on    = presences.some(p => p.id === fid && isOnlineP(p))
-                  return (
-                    <div key={f.id} className="flex items-center justify-between py-3"
-                      style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0"
-                          style={{ background: 'rgba(0,188,212,0.15)', color: C.accent }}>{fname[0]?.toUpperCase()}</div>
-                        <div>
-                          <p className="text-sm font-semibold" style={{ color: C.text }}>{fname}</p>
-                          <p className="text-xs" style={{ color: on ? '#3fb950' : C.muted }}>{on ? 'オンライン' : 'オフライン'}</p>
+              <div className="overflow-y-auto flex flex-col gap-2 mb-3" style={{ height: isDesktop ? 'calc(100vh - 220px)' : 256 }}>
+                {globalMsgs.length === 0 && <p className="text-xs text-center py-8" style={{ color: C.muted }}>まだメッセージがないよ</p>}
+                {globalMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
+                <div ref={globalEndRef} />
+              </div>
+              <CInput value={globalInput} onChange={setGlobalInput} onSend={sendGlobal} />
+            </section>
+          </>}
+
+          {/* ── 友達 ── */}
+          {tab === 'friends' && <>
+            {selFriend ? <>
+              <button onClick={() => { setSelFriend(null); selFriendRef.current = null }}
+                className="text-sm mb-3 flex items-center gap-1" style={{ color: C.muted }}>← 戻る</button>
+              <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+                <p className="font-semibold text-sm mb-3" style={{ color: C.text }}>
+                  💬 {getFriendName(selFriend)} とのDM
+                </p>
+                <div className="overflow-y-auto flex flex-col gap-2 mb-3" style={{ height: isDesktop ? 'calc(100vh - 200px)' : 400 }}>
+                  {dmMsgs.length === 0 && <p className="text-xs text-center py-8" style={{ color: C.muted }}>まだメッセージがないよ</p>}
+                  {dmMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
+                  <div ref={dmEndRef} />
+                </div>
+                <CInput value={dmInput} onChange={setDmInput} onSend={sendDm} />
+              </section>
+            </> : <>
+              <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>友達を追加</p>
+                <div className="flex gap-2">
+                  <input value={addInput} onChange={e => { setAddInput(e.target.value); setAddError('') }}
+                    onKeyDown={e => e.key === 'Enter' && sendFriendReq()}
+                    placeholder="ユーザー名を入力" className="flex-1 rounded-lg px-3 py-2 text-sm outline-none"
+                    style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
+                  <button onClick={sendFriendReq} className="px-4 py-2 rounded-lg text-sm font-bold"
+                    style={{ background: C.accent, color: C.bg }}>送信</button>
+                </div>
+                {addError && <p className="text-xs mt-2" style={{ color: '#f85149' }}>{addError}</p>}
+              </section>
+
+              {pending.length > 0 && (
+                <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: '1px solid #f0883e' }}>
+                  <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: '#f0883e' }}>
+                    申請が届いてるよ ({pending.length})
+                  </p>
+                  {pending.map(f => (
+                    <div key={f.id} className="flex items-center justify-between py-2">
+                      <span className="text-sm" style={{ color: C.text }}>{getFriendName(f.requester_id)}</span>
+                      <div className="flex gap-2">
+                        <button onClick={() => acceptFriend(f.id)} className="text-xs px-3 py-1 rounded-lg font-bold"
+                          style={{ background: 'rgba(63,185,80,0.15)', color: '#3fb950', border: '1px solid rgba(63,185,80,0.4)' }}>承認</button>
+                        <button onClick={() => removeFriend(f.id)} className="text-xs px-3 py-1 rounded-lg"
+                          style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}>拒否</button>
+                      </div>
+                    </div>
+                  ))}
+                </section>
+              )}
+
+              <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
+                  友達 ({accepted.length})
+                </p>
+                {accepted.length === 0
+                  ? <p className="text-sm text-center py-6" style={{ color: C.muted }}>まだ友達がいないよ</p>
+                  : <div className="flex flex-col">{accepted.map(f => {
+                    const fid = getFriendId(f); const fname = getFriendName(fid)
+                    const on = presences.some(p => p.id === fid && isOnlineP(p))
+                    return (
+                      <div key={f.id} className="flex items-center justify-between py-3"
+                        style={{ borderBottom: `1px solid ${C.border}` }}>
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0"
+                            style={{ background: 'rgba(0,188,212,0.15)', color: C.accent }}>{fname[0]?.toUpperCase()}</div>
+                          <div>
+                            <p className="text-sm font-semibold" style={{ color: C.text }}>{fname}</p>
+                            <p className="text-xs" style={{ color: on ? '#3fb950' : C.muted }}>{on ? 'オンライン' : 'オフライン'}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => openDm(fid)} className="text-xs px-3 py-1 rounded-lg"
+                            style={{ background: 'rgba(0,188,212,0.1)', color: C.accent, border: `1px solid rgba(0,188,212,0.3)` }}>DM</button>
+                          <button onClick={() => removeFriend(f.id)} className="text-xs px-3 py-1 rounded-lg"
+                            style={{ background: 'transparent', color: C.muted, border: `1px solid ${C.border}` }}>削除</button>
                         </div>
                       </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => openDm(fid)} className="text-xs px-3 py-1 rounded-lg"
-                          style={{ background: 'rgba(0,188,212,0.1)', color: C.accent, border: `1px solid rgba(0,188,212,0.3)` }}>DM</button>
-                        <button onClick={() => removeFriend(f.id)} className="text-xs px-3 py-1 rounded-lg"
-                          style={{ background: 'transparent', color: C.muted, border: `1px solid ${C.border}` }}>削除</button>
-                      </div>
-                    </div>
-                  )
-                })}</div>
-              }
-            </section>
+                    )
+                  })}</div>
+                }
+              </section>
+            </>}
           </>}
-        </>}
 
-        {/* ── グループ ── */}
-        {tab === 'groups' && <>
-          {selGroup ? <>
-            <button onClick={() => { setSelGroup(null); selGroupRef.current = null }}
-              className="text-sm mb-3 flex items-center gap-1" style={{ color: C.muted }}>← 戻る</button>
-            <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-              <p className="font-semibold text-sm mb-2" style={{ color: C.text }}>
-                {groups.find(g => g.id === selGroup)?.name}
-              </p>
-              {groups.find(g => g.id === selGroup)?.owner_id === userIdRef.current && (
-                <div className="mb-3">
-                  <div className="flex gap-2">
-                    <input value={inviteInput} onChange={e => { setInviteInput(e.target.value); setInviteError('') }}
-                      onKeyDown={e => e.key === 'Enter' && inviteToGroup()}
-                      placeholder="友達のユーザー名を招待" className="flex-1 rounded-lg px-3 py-1.5 text-xs outline-none"
-                      style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
-                    <button onClick={inviteToGroup} className="text-xs px-3 py-1.5 rounded-lg font-bold"
-                      style={{ background: C.accent, color: C.bg }}>招待</button>
-                  </div>
-                  {inviteError && <p className="text-xs mt-1" style={{ color: '#f85149' }}>{inviteError}</p>}
-                </div>
-              )}
-              <div className="h-80 overflow-y-auto flex flex-col gap-2 mb-3">
-                {groupMsgs.length === 0 && <p className="text-xs text-center py-8" style={{ color: C.muted }}>まだメッセージがないよ</p>}
-                {groupMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
-                <div ref={groupEndRef} />
-              </div>
-              <CInput value={groupInput} onChange={setGroupInput} onSend={sendGroupMsg} />
-            </section>
-          </> : <>
-            <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-              <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>グループを作成</p>
-              <div className="flex gap-2">
-                <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && createGroup()}
-                  placeholder="グループ名" className="flex-1 rounded-lg px-3 py-2 text-sm outline-none"
-                  style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
-                <button onClick={createGroup} className="px-4 py-2 rounded-lg text-sm font-bold"
-                  style={{ background: C.accent, color: C.bg }}>作成</button>
-              </div>
-            </section>
-            <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-              <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
-                グループ ({groups.length})
-              </p>
-              {groups.length === 0
-                ? <p className="text-sm text-center py-6" style={{ color: C.muted }}>まだグループがないよ</p>
-                : <div className="flex flex-col gap-2">{groups.map(g => (
-                  <button key={g.id} onClick={() => openGroup(g.id)}
-                    className="flex items-center gap-3 p-3 rounded-xl text-left w-full"
-                    style={{ background: C.bg, border: `1px solid ${C.border}` }}>
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
-                      style={{ background: 'rgba(0,188,212,0.15)', color: C.accent }}>{g.name[0]?.toUpperCase()}</div>
-                    <div>
-                      <p className="text-sm font-semibold" style={{ color: C.text }}>{g.name}</p>
-                      <p className="text-xs" style={{ color: C.muted }}>{groupMemCount[g.id] ?? 0}人</p>
+          {/* ── グループ ── */}
+          {tab === 'groups' && <>
+            {selGroup ? <>
+              <button onClick={() => { setSelGroup(null); selGroupRef.current = null }}
+                className="text-sm mb-3 flex items-center gap-1" style={{ color: C.muted }}>← 戻る</button>
+              <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+                <p className="font-semibold text-sm mb-2" style={{ color: C.text }}>
+                  {groups.find(g => g.id === selGroup)?.name}
+                </p>
+                {groups.find(g => g.id === selGroup)?.owner_id === userIdRef.current && (
+                  <div className="mb-3">
+                    <div className="flex gap-2">
+                      <input value={inviteInput} onChange={e => { setInviteInput(e.target.value); setInviteError('') }}
+                        onKeyDown={e => e.key === 'Enter' && inviteToGroup()}
+                        placeholder="友達のユーザー名を招待" className="flex-1 rounded-lg px-3 py-1.5 text-xs outline-none"
+                        style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
+                      <button onClick={inviteToGroup} className="text-xs px-3 py-1.5 rounded-lg font-bold"
+                        style={{ background: C.accent, color: C.bg }}>招待</button>
                     </div>
-                  </button>
-                ))}</div>
-              }
-            </section>
+                    {inviteError && <p className="text-xs mt-1" style={{ color: '#f85149' }}>{inviteError}</p>}
+                  </div>
+                )}
+                <div className="overflow-y-auto flex flex-col gap-2 mb-3" style={{ height: isDesktop ? 'calc(100vh - 220px)' : 320 }}>
+                  {groupMsgs.length === 0 && <p className="text-xs text-center py-8" style={{ color: C.muted }}>まだメッセージがないよ</p>}
+                  {groupMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} />)}
+                  <div ref={groupEndRef} />
+                </div>
+                <CInput value={groupInput} onChange={setGroupInput} onSend={sendGroupMsg} />
+              </section>
+            </> : <>
+              <section className="rounded-xl p-4 mb-3" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>グループを作成</p>
+                <div className="flex gap-2">
+                  <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && createGroup()}
+                    placeholder="グループ名" className="flex-1 rounded-lg px-3 py-2 text-sm outline-none"
+                    style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text }} />
+                  <button onClick={createGroup} className="px-4 py-2 rounded-lg text-sm font-bold"
+                    style={{ background: C.accent, color: C.bg }}>作成</button>
+                </div>
+              </section>
+              <section className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>
+                  グループ ({groups.length})
+                </p>
+                {groups.length === 0
+                  ? <p className="text-sm text-center py-6" style={{ color: C.muted }}>まだグループがないよ</p>
+                  : <div className="flex flex-col gap-2">{groups.map(g => (
+                    <button key={g.id} onClick={() => openGroup(g.id)}
+                      className="flex items-center gap-3 p-3 rounded-xl text-left w-full"
+                      style={{ background: C.bg, border: `1px solid ${C.border}` }}>
+                      <div className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
+                        style={{ background: 'rgba(0,188,212,0.15)', color: C.accent }}>{g.name[0]?.toUpperCase()}</div>
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: C.text }}>{g.name}</p>
+                        <p className="text-xs" style={{ color: C.muted }}>{groupMemCount[g.id] ?? 0}人</p>
+                      </div>
+                    </button>
+                  ))}</div>
+                }
+              </section>
+            </>}
           </>}
-        </>}
+        </main>
+
+        {/* Right panel — desktop only */}
+        <aside className="hidden lg:flex flex-col overflow-y-auto"
+          style={{ width: 280, flexShrink: 0, padding: 12, background: C.bg, borderLeft: `1px solid ${C.border}` }}>
+          {StatusSection}
+          {OnlineSection}
+          {VoiceSection}
+        </aside>
       </div>
 
-      {/* Bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 flex z-20"
+      {/* Bottom nav — mobile only */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 flex z-20"
         style={{ background: C.card, borderTop: `1px solid ${C.border}` }}>
-        {(['all', 'friends', 'groups'] as Tab[]).map(t => {
-          const labels: Record<Tab, string> = { all: '全体', friends: '友達', groups: 'グループ' }
-          const icons:  Record<Tab, string> = { all: '🌐', friends: '👥', groups: '💬' }
+        {navItems.map(({ t, icon, label }) => {
           const badge = t === 'friends' && pending.length > 0 ? pending.length : 0
           return (
             <button key={t} onClick={() => setTab(t)}
               className="flex-1 flex flex-col items-center py-3 gap-0.5 relative"
               style={{ color: tab === t ? C.accent : C.muted }}>
-              <span className="text-xl">{icons[t]}</span>
-              <span className="text-[10px] font-semibold">{labels[t]}</span>
-              {badge > 0 && (
-                <span className="absolute top-1.5 right-[28%] w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center"
-                  style={{ background: '#f85149', color: 'white' }}>{badge}</span>
-              )}
+              <span className="text-xl">{icon}</span>
+              <span className="text-[10px] font-semibold">{label}</span>
+              {badge > 0 && <span className="absolute top-1.5 right-[28%] w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center"
+                style={{ background: '#f85149', color: 'white' }}>{badge}</span>}
             </button>
           )
         })}
