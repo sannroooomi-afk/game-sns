@@ -71,6 +71,7 @@ export default function Page() {
   const [newGroupName, setNewGroupName]   = useState('')
   const [inviteInput, setInviteInput]     = useState('')
   const [inviteError, setInviteError]     = useState('')
+  const [friendsView, setFriendsView]     = useState<'online'|'all'|'pending'|'add'>('online')
 
   const userIdRef    = useRef('')
   const userNameRef  = useRef('')
@@ -175,9 +176,11 @@ export default function Page() {
       }).subscribe()
 
     const fSub = supabase.channel('friend-rt').on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => loadFriends()).subscribe()
+    const gSub = supabase.channel('grpmem-rt').on('postgres_changes', { event: '*', schema: 'public', table: 'group_members' },
+      ({ new: n }) => { if ((n as any)?.user_id === uid) loadGroups() }).subscribe()
 
     upsert(); timerRef.current = setInterval(() => upsert(), 60_000)
-    return () => { pSub.unsubscribe(); mSub.unsubscribe(); fSub.unsubscribe(); if (timerRef.current) clearInterval(timerRef.current) }
+    return () => { pSub.unsubscribe(); mSub.unsubscribe(); fSub.unsubscribe(); gSub.unsubscribe(); if (timerRef.current) clearInterval(timerRef.current) }
   }, [ready, loadFriends, loadGroups, loadGlobal, upsert])
 
   const changeServer = (s: number) => { setServer(s); serverRef.current = s; setGlobalMsgs([]); loadGlobal(s); upsert() }
@@ -304,8 +307,9 @@ export default function Page() {
   const getFName = (id: string) => friendUsers[id]?.username ?? '...'
   const online   = presences.filter(p => p.id !== userIdRef.current && isOnlineP(p) && p.server === server)
   const pending  = friends.filter(f => f.status === 'pending' && f.addressee_id === userIdRef.current)
-  const accepted = friends.filter(f => f.status === 'accepted')
-  const isAdmin  = userName === ADMIN
+  const accepted     = friends.filter(f => f.status === 'accepted')
+  const friendsOnline = accepted.filter(f => presences.some(p => p.id === getFId(f) && isOnlineP(p)))
+  const isAdmin      = userName === ADMIN
 
   const chatTitle = chatType === 'global' ? `# 全体 · サーバー${server}` : chatType === 'dm' ? `@ ${getFName(selFriend!)}` : `# ${groups.find(g => g.id === selGroup)?.name ?? ''}`
 
@@ -379,58 +383,63 @@ export default function Page() {
           </div>
         )}
 
-        {/* ── 友達 list ── */}
+        {/* ── 友達 list (Discord DM style) ── */}
         {tab === 'friends' && (
-          <div>
-            {/* Add friend */}
-            <div style={{ padding: '10px 10px 0' }}>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input value={addInput} onChange={e => { setAddInput(e.target.value); setAddError('') }}
-                  onKeyDown={e => e.key === 'Enter' && sendFriendReq()}
-                  placeholder="ユーザー名で追加"
-                  style={{ flex: 1, background: BG, border: `1px solid ${BD}`, borderRadius: 8, padding: '8px 10px', color: TXT, fontSize: 12, outline: 'none' }} />
-                <button onClick={sendFriendReq} style={{ background: ACC, color: BG, border: 'none', borderRadius: 8, padding: '0 12px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>追加</button>
-              </div>
-              {addError && <p style={{ color: '#f85149', fontSize: 11, marginTop: 4 }}>{addError}</p>}
-            </div>
-
-            {/* Pending */}
-            {pending.length > 0 && (
-              <div style={{ padding: '10px 10px 0' }}>
-                <p style={{ fontSize: 10, fontWeight: 700, color: '#f0883e', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>申請 {pending.length}</p>
-                {pending.map(f => (
-                  <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: `1px solid ${BD}` }}>
-                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(240,136,62,0.15)', color: '#f0883e', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13, flexShrink: 0 }}>
-                      {getFName(f.requester_id)[0]?.toUpperCase()}
-                    </div>
-                    <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: TXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getFName(f.requester_id)}</span>
-                    <button onClick={() => acceptFriend(f.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, padding: 2 }}>✅</button>
-                    <button onClick={() => removeFriend(f.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, padding: 2 }}>❌</button>
-                  </div>
-                ))}
+          <div style={{ padding: '8px 6px' }}>
+            {/* Mobile only: add friend */}
+            {!isDesktop && (
+              <div style={{ padding: '4px 6px 8px' }}>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input value={addInput} onChange={e => { setAddInput(e.target.value); setAddError('') }}
+                    onKeyDown={e => e.key === 'Enter' && sendFriendReq()} placeholder="ユーザー名で追加"
+                    style={{ flex: 1, background: BG, border: `1px solid ${BD}`, borderRadius: 8, padding: '7px 10px', color: TXT, fontSize: 12, outline: 'none' }} />
+                  <button onClick={sendFriendReq} style={{ background: ACC, color: BG, border: 'none', borderRadius: 8, padding: '0 10px', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>追加</button>
+                </div>
+                {addError && <p style={{ color: '#f85149', fontSize: 11, marginTop: 4 }}>{addError}</p>}
               </div>
             )}
 
-            {/* Friends list */}
-            <p style={{ fontSize: 10, fontWeight: 700, color: MUT, padding: '12px 20px 4px', textTransform: 'uppercase', letterSpacing: 1 }}>
-              友達 — {accepted.length}
-            </p>
+            {/* Pending */}
+            {pending.length > 0 && (
+              <>
+                <p style={{ fontSize: 10, fontWeight: 700, color: '#f0883e', padding: '4px 8px 6px', textTransform: 'uppercase', letterSpacing: 1 }}>申請 {pending.length}</p>
+                {pending.map(f => {
+                  const fname = getFName(f.requester_id)
+                  return (
+                    <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', borderRadius: 8, marginBottom: 2 }}>
+                      <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(240,136,62,0.15)', color: '#f0883e', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
+                        {fname[0]?.toUpperCase()}
+                      </div>
+                      <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: TXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fname}</span>
+                      <button onClick={() => acceptFriend(f.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15 }}>✅</button>
+                      <button onClick={() => removeFriend(f.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15 }}>❌</button>
+                    </div>
+                  )
+                })}
+              </>
+            )}
+
+            {/* DM list */}
+            <p style={{ fontSize: 10, fontWeight: 700, color: MUT, padding: '8px 8px 4px', textTransform: 'uppercase', letterSpacing: 1 }}>ダイレクトメッセージ</p>
             {accepted.map(f => {
               const fid = getFId(f); const fname = getFName(fid)
               const on = presences.some(p => p.id === fid && isOnlineP(p))
+              const fp = presences.find(p => p.id === fid)
               const active = chatType === 'dm' && selFriend === fid
               return (
                 <button key={f.id} onClick={() => openDm(fid)}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: active ? 'rgba(0,188,212,0.1)' : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: 8, background: active ? 'rgba(0,188,212,0.15)' : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left', marginBottom: 1 }}>
                   <div style={{ position: 'relative', flexShrink: 0 }}>
-                    <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15 }}>
                       {fname[0]?.toUpperCase()}
                     </div>
-                    <span style={{ position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: '50%', background: on ? '#3fb950' : '#6e7681', border: '2px solid ' + CARD }} />
+                    <span style={{ position: 'absolute', bottom: 0, right: 0, width: 11, height: 11, borderRadius: '50%', background: on ? '#3fb950' : '#6e7681', border: '2px solid ' + CARD }} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: active ? ACC : TXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fname}</p>
-                    <p style={{ fontSize: 11, color: on ? '#3fb950' : MUT }}>{on ? 'オンライン' : 'オフライン'}</p>
+                    <p style={{ fontSize: 14, fontWeight: 600, color: active ? ACC : TXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fname}</p>
+                    <p style={{ fontSize: 11, color: MUT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {on ? (fp?.game || fp?.status || 'オンライン') : 'オフライン'}
+                    </p>
                   </div>
                 </button>
               )
@@ -475,16 +484,20 @@ export default function Page() {
         </div>
       )}
 
-      {/* User bar - bottom */}
-      <div style={{ borderTop: `1px solid ${BD}`, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, background: '#0d1117' }}>
-        <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(0,188,212,0.2)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13, flexShrink: 0 }}>
-          {userName[0]?.toUpperCase()}
+      {/* User bar - Discord style */}
+      <div style={{ borderTop: `1px solid ${BD}`, padding: '8px 8px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, background: '#111618' }}>
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(0,188,212,0.2)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 }}>
+            {userName[0]?.toUpperCase()}
+          </div>
+          <span style={{ position: 'absolute', bottom: 0, right: 0, width: 11, height: 11, borderRadius: '50%', background: '#3fb950', border: '2px solid #111618' }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: TXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{userName}</p>
           <p style={{ fontSize: 11, color: '#3fb950' }}>オンライン</p>
         </div>
-        <button onClick={handleLogout} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, opacity: 0.6 }} title="ログアウト">🚪</button>
+        <button onClick={handleLogout} title="ログアウト"
+          style={{ width: 30, height: 30, background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: MUT, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, flexShrink: 0 }}>🚪</button>
       </div>
     </div>
   )
@@ -549,6 +562,91 @@ export default function Page() {
     </div>
   )
 
+  // ── Friends main area (Discord style) ───────────────────────
+  const FriendsMainArea = (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ padding: '0 16px', height: 48, borderBottom: `1px solid ${BD}`, display: 'flex', alignItems: 'center', gap: 6, background: CARD, flexShrink: 0 }}>
+        <span style={{ fontSize: 18, marginRight: 4 }}>👥</span>
+        <span style={{ fontWeight: 700, color: TXT, fontSize: 15 }}>フレンド</span>
+        <div style={{ width: 1, height: 20, background: BD, margin: '0 6px' }} />
+        {(['online','all','pending','add'] as const).map(v => {
+          const label = v === 'online' ? 'オンライン' : v === 'all' ? '全て表示' : v === 'pending' ? `申請中${pending.length > 0 ? ` (${pending.length})` : ''}` : 'フレンドに追加'
+          return (
+            <button key={v} onClick={() => setFriendsView(v)}
+              style={{ padding: '4px 10px', borderRadius: 6, fontSize: 13, fontWeight: friendsView === v ? 700 : 500, cursor: 'pointer', border: 'none',
+                background: friendsView === v ? 'rgba(255,255,255,0.1)' : 'transparent',
+                color: friendsView === v ? TXT : MUT }}>
+              {label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 30px' }}>
+        {friendsView === 'add' ? (
+          <div style={{ maxWidth: 600 }}>
+            <p style={{ color: TXT, fontWeight: 700, fontSize: 16, marginBottom: 4 }}>フレンドを追加</p>
+            <p style={{ color: MUT, fontSize: 13, marginBottom: 16 }}>ユーザー名で検索してフレンド申請を送れます。</p>
+            <div style={{ display: 'flex', gap: 8, background: '#21262d', borderRadius: 10, padding: '4px 4px 4px 16px', border: `1px solid ${addError ? '#f85149' : BD}` }}>
+              <input value={addInput} onChange={e => { setAddInput(e.target.value); setAddError('') }}
+                onKeyDown={e => e.key === 'Enter' && sendFriendReq()} placeholder="ユーザー名を入力..."
+                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: TXT, fontSize: 14, padding: '8px 0' }} />
+              <button onClick={sendFriendReq}
+                style={{ background: ACC, color: BG, border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>申請を送る</button>
+            </div>
+            {addError && <p style={{ color: '#f85149', fontSize: 12, marginTop: 8 }}>{addError}</p>}
+          </div>
+        ) : (
+          <>
+            <p style={{ fontSize: 11, fontWeight: 700, color: MUT, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+              {friendsView === 'online' ? `オンライン — ${friendsOnline.length}` : friendsView === 'all' ? `全てのフレンド — ${accepted.length}` : `保留中 — ${pending.length}`}
+            </p>
+            {(friendsView === 'online' ? friendsOnline : friendsView === 'all' ? accepted : pending).map(f => {
+              const isPending = friendsView === 'pending'
+              const fid = isPending ? f.requester_id : getFId(f)
+              const fname = getFName(fid)
+              const on = presences.some(p => p.id === fid && isOnlineP(p))
+              const fp = presences.find(p => p.id === fid)
+              return (
+                <div key={f.id}
+                  style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 16px', borderRadius: 10, marginBottom: 2, cursor: isPending ? 'default' : 'pointer', borderTop: `1px solid ${BD}` }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#21262d')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  onClick={() => !isPending && openDm(fid)}>
+                  <div style={{ position: 'relative' }}>
+                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 18 }}>
+                      {fname[0]?.toUpperCase()}
+                    </div>
+                    <span style={{ position: 'absolute', bottom: 0, right: 0, width: 13, height: 13, borderRadius: '50%', background: on ? '#3fb950' : '#6e7681', border: '2px solid ' + BG }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 15, fontWeight: 700, color: TXT }}>{fname}</p>
+                    <p style={{ fontSize: 12, color: MUT }}>{on ? (fp?.game || fp?.status || 'オンライン') : 'オフライン'}</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
+                    {isPending ? (
+                      <>
+                        <button onClick={() => acceptFriend(f.id)} style={{ width: 34, height: 34, borderRadius: '50%', background: '#21262d', border: 'none', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✅</button>
+                        <button onClick={() => removeFriend(f.id)} style={{ width: 34, height: 34, borderRadius: '50%', background: '#21262d', border: 'none', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>❌</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => openDm(fid)} title="メッセージ" style={{ width: 34, height: 34, borderRadius: '50%', background: '#21262d', border: 'none', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>💬</button>
+                        <button onClick={() => removeFriend(f.id)} title="フレンド解除" style={{ width: 34, height: 34, borderRadius: '50%', background: '#21262d', border: 'none', cursor: 'pointer', fontSize: 14, color: '#f85149', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </>
+        )}
+      </div>
+    </div>
+  )
+
   // ── Status panel (right side on mobile 全体 tab) ──────────
   const StatusPanel = (
     <div style={{ padding: '12px 16px', borderBottom: `1px solid ${BD}`, background: CARD, flexShrink: 0 }}>
@@ -600,10 +698,15 @@ export default function Page() {
       {/* List panel */}
       {ListPanel}
 
-      {/* Main: status bar + chat */}
+      {/* Main area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {StatusPanel}
-        {ChatArea}
+        {tab === 'friends' && chatType !== 'dm'
+          ? FriendsMainArea
+          : <>
+              {chatType === 'global' && StatusPanel}
+              {ChatArea}
+            </>
+        }
       </div>
     </div>
   )
