@@ -66,7 +66,7 @@ export default function VoiceChat({ userId, userName, channel, presences }: Prop
       const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' })
       clientRef.current = client
 
-      client.on('user-published', async (user: any, mediaType: string) => {
+      client.on('user-published', async (user: any, mediaType: 'audio' | 'video' | 'datachannel') => {
         if (user.uid === myUid) return
         await client.subscribe(user, mediaType)
         if (mediaType === 'audio') user.audioTrack?.play()
@@ -83,7 +83,7 @@ export default function VoiceChat({ userId, userName, channel, presences }: Prop
         )
       })
 
-      client.on('user-unpublished', (user: any, mediaType: string) => {
+      client.on('user-unpublished', (user: any, mediaType: 'audio' | 'video' | 'datachannel') => {
         if (mediaType === 'video')
           setMembers(prev => prev.map(m => m.uid === user.uid ? { ...m, hasVideo: false } : m))
       })
