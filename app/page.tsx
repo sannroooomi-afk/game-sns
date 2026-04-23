@@ -153,14 +153,25 @@ export default function Page() {
         else { const p = n as Presence; setPresences(prev => { const i = prev.findIndex(x => x.id === p.id); if (i >= 0) { const a = [...prev]; a[i] = p; return a } return [p, ...prev] }) }
       }).subscribe()
 
-    const mSub = supabase.channel('msg-rt').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' },
-      ({ new: n }) => {
-        const msg = n as Message
-        if (!msg.dm_to && !msg.group_id && msg.server_id === serverRef.current) setGlobalMsgs(p => [...p, msg])
-        else if (msg.dm_to && (msg.user_id === uid || msg.dm_to === uid)) {
-          const other = msg.user_id === uid ? msg.dm_to : msg.user_id
-          if (selFriendRef.current === other) setDmMsgs(p => [...p, msg])
-        } else if (msg.group_id && msg.group_id === selGroupRef.current) setGroupMsgs(p => [...p, msg])
+    const mSub = supabase.channel('msg-rt').on('postgres_changes', { event: '*', schema: 'public', table: 'messages' },
+      ({ eventType, new: n, old: o }) => {
+        if (eventType === 'INSERT') {
+          const msg = n as Message
+          if (!msg.dm_to && !msg.group_id && msg.server_id === serverRef.current) setGlobalMsgs(p => [...p, msg])
+          else if (msg.dm_to && (msg.user_id === uid || msg.dm_to === uid)) {
+            const other = msg.user_id === uid ? msg.dm_to : msg.user_id
+            if (selFriendRef.current === other) setDmMsgs(p => [...p, msg])
+          } else if (msg.group_id && msg.group_id === selGroupRef.current) setGroupMsgs(p => [...p, msg])
+        } else if (eventType === 'UPDATE') {
+          const msg = n as Message
+          const upd = (msgs: Message[]) => msgs.map(m => m.id === msg.id ? { ...m, content: msg.content, edited: msg.edited } : m)
+          setGlobalMsgs(upd); setDmMsgs(upd); setGroupMsgs(upd)
+        } else if (eventType === 'DELETE') {
+          const id = (o as any).id
+          setGlobalMsgs(p => p.filter(m => m.id !== id))
+          setDmMsgs(p => p.filter(m => m.id !== id))
+          setGroupMsgs(p => p.filter(m => m.id !== id))
+        }
       }).subscribe()
 
     const fSub = supabase.channel('friend-rt').on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => loadFriends()).subscribe()
