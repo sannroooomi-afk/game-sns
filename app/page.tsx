@@ -500,7 +500,8 @@ export default function Page() {
 
   // ── DESKTOP layout ────────────────────────────────────────
   if (isDesktop) return (
-    <div style={{ height: '100dvh', display: 'flex', background: BG }}>
+    <div style={{ minHeight: '100dvh', background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+    <div style={{ width: 860, height: 860, display: 'flex', borderRadius: 16, overflow: 'hidden', border: `1px solid ${BD}`, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
 
       {/* Icon sidebar */}
       <div style={{ width: 60, background: SIDE, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', gap: 6, borderRight: `1px solid ${BD}`, flexShrink: 0 }}>
@@ -537,6 +538,7 @@ export default function Page() {
         {StatusPanel}
         {ChatArea}
       </div>
+    </div>
     </div>
   )
 
