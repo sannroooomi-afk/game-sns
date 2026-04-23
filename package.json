@@ -3,12 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.104.0",
+    "agora-rtc-sdk-ng": "^4.24.3",
+    "agora-token": "^2.0.5",
     "next": "16.2.4",
     "react": "19.2.4",
     "react-dom": "19.2.4"
