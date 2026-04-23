@@ -169,12 +169,22 @@ export default function Page() {
   }, [ready, loadFriends, loadGroups, loadGlobal, upsert])
 
   const changeServer = (s: number) => { setServer(s); serverRef.current = s; setGlobalMsgs([]); loadGlobal(s); upsert() }
-  const handleLogout = () => {
-    localStorage.removeItem('gf_name'); userNameRef.current = ''
+  const handleLogout = async () => {
+    const uid = userIdRef.current
     if (timerRef.current) clearInterval(timerRef.current)
+    localStorage.removeItem('gf_name'); localStorage.removeItem('gf_uid')
+    userNameRef.current = ''
+    await Promise.all([
+      supabase.from('messages').delete().eq('user_id', uid),
+      supabase.from('friendships').delete().or(`requester_id.eq.${uid},addressee_id.eq.${uid}`),
+      supabase.from('group_members').delete().eq('user_id', uid),
+      supabase.from('presences').delete().eq('id', uid),
+      supabase.from('users').delete().eq('id', uid),
+    ])
     setUserName(''); setNameInput(''); setReady(false)
     setSelFriend(null); selFriendRef.current = null; setSelGroup(null); selGroupRef.current = null
     setServer(1); serverRef.current = 1; setTab('all'); setChatType('global')
+    userIdRef.current = crypto.randomUUID(); localStorage.setItem('gf_uid', userIdRef.current)
   }
   const handleSetup = async () => {
     const raw = nameInput.trim().slice(0, 16); if (!raw) return
