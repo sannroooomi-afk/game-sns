@@ -16,6 +16,7 @@ export default function VoiceChat({ userId }: Props) {
   const [error, setError]   = useState('')
   const clientRef           = useRef<any>(null)
   const trackRef            = useRef<any>(null)
+  const joinedRef           = useRef(false)
 
   const getUid = () => Math.abs(userId.split('').reduce((a, c) => a + c.charCodeAt(0), 0)) % 100000
 
@@ -44,6 +45,7 @@ export default function VoiceChat({ userId }: Props) {
       const track = await AgoraRTC.createMicrophoneAudioTrack({ AEC: true, ANS: true, AGC: true })
       trackRef.current = track
       await client.publish([track])
+      joinedRef.current = true
       setJoined(true)
       setCount(1)
     } catch (e: any) {
@@ -56,11 +58,12 @@ export default function VoiceChat({ userId }: Props) {
     await clientRef.current?.leave()
     clientRef.current = null
     trackRef.current  = null
+    joinedRef.current = false
     setJoined(false)
     setCount(0)
   }
 
-  useEffect(() => () => { if (joined) leave() }, [])
+  useEffect(() => () => { if (joinedRef.current) leave() }, [])
 
   if (!APP_ID) return (
     <p className="text-xs" style={{ color: '#8b949e' }}>Agora App ID を .env.local に設定すると使えます</p>
