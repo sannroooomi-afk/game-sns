@@ -16,7 +16,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
-      <body className="min-h-screen">{children}</body>
+      <body style={{ margin: 0, padding: 0, height: '100dvh', overflow: 'hidden' }}>{children}</body>
     </html>
   )
 }
