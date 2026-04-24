@@ -84,6 +84,7 @@ export default function Page() {
   const [editingProfile, setEditingProfile] = useState(false)
   const [editDispName, setEditDispName]   = useState('')
   const [editBio, setEditBio]             = useState('')
+  const [isSending, setIsSending]         = useState(false)
 
   const userIdRef    = useRef('')
   const userNameRef  = useRef('')
@@ -246,11 +247,22 @@ export default function Page() {
     setUserName(modded); setUserHandle(modded); setNameError(''); setReady(true)
   }
   const sendGlobal = async () => {
-    const txt = moderate(globalInput.trim()); if (!txt) return
+    const txt = moderate(globalInput.trim()); if (!txt || isSending) return
     setGlobalInput('')
-    const tempId = `~${Date.now()}`
+    const tempId = `~${Date.now()}_${txt.slice(0, 10)}`
     setGlobalMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current, created_at: new Date().toISOString() }])
-    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current })
+    setIsSending(true)
+    try {
+      const { data, error } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current }).select().single()
+      if (error) throw error
+      if (data) setGlobalMsgs(prev => { const without = prev.filter(m => m.id !== tempId); return without.some(m => m.id === data.id) ? without : [...without, data] })
+    } catch (e) {
+      console.error('sendGlobal error:', e)
+      setGlobalInput(txt)
+      setGlobalMsgs(prev => prev.filter(m => m.id !== tempId))
+    } finally {
+      setIsSending(false)
+    }
   }
   const sendFriendReq = async () => {
     const target = addInput.trim(); if (!target) return; setAddError('')
@@ -272,12 +284,23 @@ export default function Page() {
     if (data) setDmMsgs(data)
   }
   const sendDm = async () => {
-    const txt = moderate(dmInput.trim()); if (!txt || !selFriend) return
+    const txt = moderate(dmInput.trim()); if (!txt || !selFriend || isSending) return
     setDmInput('')
     const sf = selFriend; const uid = userIdRef.current
-    const tempId = `~${Date.now()}`
+    const tempId = `~${Date.now()}_${txt.slice(0, 10)}`
     setDmMsgs(p => [...p, { id: tempId, user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf, group_id: null, server_id: null, created_at: new Date().toISOString() }])
-    await supabase.from('messages').insert({ user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf })
+    setIsSending(true)
+    try {
+      const { data, error } = await supabase.from('messages').insert({ user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf }).select().single()
+      if (error) throw error
+      if (data) setDmMsgs(prev => { const without = prev.filter(m => m.id !== tempId); return without.some(m => m.id === data.id) ? without : [...without, data] })
+    } catch (e) {
+      console.error('sendDm error:', e)
+      setDmInput(txt)
+      setDmMsgs(prev => prev.filter(m => m.id !== tempId))
+    } finally {
+      setIsSending(false)
+    }
   }
   const createGroup = async () => {
     const name = newGroupName.trim(); if (!name) return
@@ -293,12 +316,23 @@ export default function Page() {
     if (data) setGroupMsgs(data)
   }
   const sendGroupMsg = async () => {
-    const txt = moderate(groupInput.trim()); if (!txt || !selGroup) return
+    const txt = moderate(groupInput.trim()); if (!txt || !selGroup || isSending) return
     setGroupInput('')
     const sg = selGroup
-    const tempId = `~${Date.now()}`
+    const tempId = `~${Date.now()}_${txt.slice(0, 10)}`
     setGroupMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: sg, server_id: null, created_at: new Date().toISOString() }])
-    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg })
+    setIsSending(true)
+    try {
+      const { data, error } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg }).select().single()
+      if (error) throw error
+      if (data) setGroupMsgs(prev => { const without = prev.filter(m => m.id !== tempId); return without.some(m => m.id === data.id) ? without : [...without, data] })
+    } catch (e) {
+      console.error('sendGroupMsg error:', e)
+      setGroupInput(txt)
+      setGroupMsgs(prev => prev.filter(m => m.id !== tempId))
+    } finally {
+      setIsSending(false)
+    }
   }
   const deleteMsg = async (msgId: string) => {
     await supabase.from('messages').delete().eq('id', msgId)
@@ -628,11 +662,12 @@ export default function Page() {
           <input
             value={chatType === 'global' ? globalInput : chatType === 'dm' ? dmInput : groupInput}
             onChange={e => chatType === 'global' ? setGlobalInput(e.target.value) : chatType === 'dm' ? setDmInput(e.target.value) : setGroupInput(e.target.value)}
-            onKeyDown={e => { if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return; chatType === 'global' ? sendGlobal() : chatType === 'dm' ? sendDm() : sendGroupMsg() }}
+            onKeyDown={e => { if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing || isSending) return; chatType === 'global' ? sendGlobal() : chatType === 'dm' ? sendDm() : sendGroupMsg() }}
             placeholder={`${chatTitle} にメッセージ…`}
             style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: TXT, fontSize: 14, padding: '12px 16px' }} />
           <button onClick={chatType === 'global' ? sendGlobal : chatType === 'dm' ? sendDm : sendGroupMsg}
-            style={{ background: ACC, color: BG, border: 'none', padding: '12px 20px', fontWeight: 700, fontSize: 13, cursor: 'pointer', flexShrink: 0, letterSpacing: 0.5 }}>
+            disabled={isSending}
+            style={{ background: ACC, color: BG, border: 'none', padding: '12px 20px', fontWeight: 700, fontSize: 13, cursor: isSending ? 'not-allowed' : 'pointer', flexShrink: 0, letterSpacing: 0.5, opacity: isSending ? 0.5 : 1 }}>
             ↑
           </button>
         </div>
