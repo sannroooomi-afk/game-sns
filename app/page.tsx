@@ -803,7 +803,7 @@ export default function Page() {
         {([['all','🌐','全体'],['friends','👥','友達'],['groups','💬','グループ']] as [Tab,string,string][]).map(([t, icon, label]) => {
           const badge = t === 'friends' && pending.length > 0 ? pending.length : 0
           return (
-            <button key={t} onClick={() => setTab(t)} title={label}
+            <button key={t} onClick={() => { setTab(t); if (t === 'all') { setChatType('global'); setSelGroup(null); selGroupRef.current = null } }} title={label}
               style={{ position: 'relative', width: 42, height: 42, borderRadius: tab === t ? 14 : '50%', background: tab === t ? 'rgba(0,188,212,0.2)' : CARD, border: 'none', cursor: 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'border-radius 0.15s' }}>
               {icon}
               {badge > 0 && <span style={{ position: 'absolute', top: -2, right: -2, width: 16, height: 16, borderRadius: '50%', background: '#f85149', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{badge}</span>}
@@ -895,7 +895,7 @@ export default function Page() {
                   {online.map(p => (
                     <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderRadius: 12, background: CARD, border: `1px solid ${p.recruiting ? '#3fb950' : BD}`, marginBottom: 6 }}>
                       <div style={{ position: 'relative', flexShrink: 0 }}>
-                        <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15 }}>{p.name?.[0]?.toUpperCase()}</div>
+                        <div onClick={() => openProfile(p.id)} style={{ width: 38, height: 38, borderRadius: '50%', background: avatarColor(p.name || '?'), color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>{p.name?.[0]?.toUpperCase()}</div>
                         <span style={{ position: 'absolute', bottom: 0, right: 0, width: 11, height: 11, borderRadius: '50%', background: '#3fb950', border: '2px solid ' + CARD }} />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -923,7 +923,7 @@ export default function Page() {
           {([['all','🌐','全体'],['friends','👥','友達'],['groups','💬','グループ']] as [Tab,string,string][]).map(([t, icon, label]) => {
             const badge = t === 'friends' && pending.length > 0 ? pending.length : 0
             return (
-              <button key={t} onClick={() => { setTab(t); if (t === 'all') setChatType('global') }}
+              <button key={t} onClick={() => { setTab(t); if (t === 'all') { setChatType('global'); setSelGroup(null); selGroupRef.current = null } }}
                 style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0 6px', gap: 2, background: 'none', border: 'none', cursor: 'pointer', position: 'relative', color: tab === t ? ACC : MUT }}>
                 <span style={{ fontSize: 22 }}>{icon}</span>
                 <span style={{ fontSize: 10, fontWeight: 600 }}>{label}</span>
@@ -971,7 +971,7 @@ function Bubble({ m, myId, isAdmin, onDelete, onEdit, onAvatarClick }: {
             {m.edited && <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 4 }}>(編集済)</span>}
           </div>
         )}
-        {!editing && !system && (me || isAdmin) && (
+        {!editing && !system && (me || isAdmin || (!m.dm_to && !m.group_id)) && (
           <div style={{ display: 'flex', gap: 4, padding: '2px 4px' }}>
             {me && (
               <button onClick={() => { setEditVal(m.content); setEditing(true) }}

@@ -1,9 +1,11 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { supabase } from '@/lib/supabase'
 
 interface VoiceMember { uid: number; name: string; muted?: boolean; hasVideo?: boolean }
 interface SimplePresence { id: string; name: string }
+interface VcUser { uid: string; name: string; agoraUid?: number }
 
 interface Props {
   userId: string
@@ -19,18 +21,41 @@ function uidFromId(id: string): number {
 }
 
 export default function VoiceChat({ userId, userName, channel, presences }: Props) {
-  const [joined, setJoined]   = useState(false)
-  const [members, setMembers] = useState<VoiceMember[]>([])
-  const [error, setError]     = useState('')
-  const [muted, setMuted]     = useState(false)
-  const [videoOn, setVideoOn] = useState(false)
+  const [joined, setJoined]     = useState(false)
+  const [members, setMembers]   = useState<VoiceMember[]>([])
+  const [vcOnline, setVcOnline] = useState<VcUser[]>([])
+  const [error, setError]       = useState('')
+  const [muted, setMuted]       = useState(false)
+  const [videoOn, setVideoOn]   = useState(false)
 
   const clientRef    = useRef<any>(null)
   const trackRef     = useRef<any>(null)
   const videoRef     = useRef<any>(null)
   const joinedRef    = useRef(false)
   const presencesRef = useRef<SimplePresence[]>(presences)
+  const vcChRef      = useRef<any>(null)
   const myUid        = uidFromId(userId)
+
+  // Supabase Realtime Presence — always subscribed so anyone can see who's in voice
+  useEffect(() => {
+    const ch = supabase.channel(`vc-pres-${channel}`, {
+      config: { presence: { key: userId } }
+    })
+    vcChRef.current = ch
+
+    ch.on('presence', { event: 'sync' }, () => {
+      const state = ch.presenceState()
+      const list: VcUser[] = Object.entries(state).map(([uid, data]: [string, any]) => ({
+        uid,
+        name: data[0]?.name ?? '?',
+        agoraUid: data[0]?.agoraUid,
+      }))
+      setVcOnline(list)
+    })
+
+    ch.subscribe()
+    return () => { ch.unsubscribe(); vcChRef.current = null }
+  }, [channel, userId])
 
   useEffect(() => {
     presencesRef.current = presences
@@ -44,6 +69,7 @@ export default function VoiceChat({ userId, userName, channel, presences }: Prop
     presencesRef.current.find(p => uidFromId(p.id) === uid)?.name ?? `?${uid}`
 
   const leave = async () => {
+    await vcChRef.current?.untrack()
     videoRef.current?.close()
     trackRef.current?.close()
     await clientRef.current?.leave()
@@ -99,6 +125,9 @@ export default function VoiceChat({ userId, userName, channel, presences }: Prop
       joinedRef.current = true
       setJoined(true)
       setMembers([{ uid: myUid, name: userName }])
+
+      // Appear in voice presence list for everyone
+      await vcChRef.current?.track({ name: userName, agoraUid: myUid })
     } catch (e: any) {
       setError(e.message ?? '接続エラー')
     }
@@ -142,11 +171,16 @@ export default function VoiceChat({ userId, userName, channel, presences }: Prop
     <p style={{ fontSize: 12, color: '#8b949e' }}>Agora App ID を .env.local に設定すると使えます</p>
   )
 
-  const btnBase: React.CSSProperties = { padding: '5px 10px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: 'none' }
+  const btnBase: React.CSSProperties = {
+    padding: '5px 10px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: 'none'
+  }
+
+  const videoMembers = members.filter(m => m.hasVideo)
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+      {/* Controls */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
         <button onClick={joined ? leave : join} style={{ ...btnBase,
           ...(joined
             ? { background: 'rgba(248,81,73,0.15)', color: '#f85149', border: '1px solid rgba(248,81,73,0.4)' }
@@ -155,14 +189,14 @@ export default function VoiceChat({ userId, userName, channel, presences }: Prop
         </button>
 
         {joined && <>
-          <button onClick={toggleMute} title={muted ? 'ミュート解除' : 'ミュート'} style={{ ...btnBase,
+          <button onClick={toggleMute} style={{ ...btnBase,
             ...(muted
               ? { background: 'rgba(248,81,73,0.15)', color: '#f85149', border: '1px solid rgba(248,81,73,0.4)' }
               : { background: 'rgba(139,148,158,0.1)', color: '#8b949e', border: '1px solid rgba(139,148,158,0.3)' }) }}>
             {muted ? '🔇 解除' : '🎤 ミュート'}
           </button>
 
-          <button onClick={toggleVideo} title={videoOn ? 'カメラOFF' : 'カメラON'} style={{ ...btnBase,
+          <button onClick={toggleVideo} style={{ ...btnBase,
             ...(videoOn
               ? { background: 'rgba(0,188,212,0.15)', color: '#00bcd4', border: '1px solid rgba(0,188,212,0.4)' }
               : { background: 'rgba(139,148,158,0.1)', color: '#8b949e', border: '1px solid rgba(139,148,158,0.3)' }) }}>
@@ -175,23 +209,38 @@ export default function VoiceChat({ userId, userName, channel, presences }: Prop
         {error && <span style={{ fontSize: 11, color: '#f85149' }}>{error}</span>}
       </div>
 
-      {joined && members.length > 0 && (
+      {/* Who's in voice — visible to everyone (Supabase Presence) */}
+      {vcOnline.length > 0 && (
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
+          {vcOnline.map(u => {
+            const agoraMem = members.find(m => m.uid === u.agoraUid)
+            const isMuted  = agoraMem?.muted ?? false
+            const isMe     = u.uid === userId
+            return (
+              <div key={u.uid} style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                background: 'rgba(63,185,80,0.1)', border: '1px solid rgba(63,185,80,0.25)',
+                borderRadius: 12, padding: '3px 8px',
+              }}>
+                <span style={{ fontSize: 10 }}>{isMuted ? '🔇' : '🎤'}</span>
+                <span style={{ fontSize: 11, color: '#3fb950', fontWeight: 600 }}>
+                  {isMe ? 'あなた' : u.name}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Video grid */}
+      {joined && videoMembers.length > 0 && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          {members.map(m => (
+          {videoMembers.map(m => (
             <div key={m.uid} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-              {m.hasVideo ? (
-                <div id={`vc-${m.uid}`} style={{ width: 80, height: 56, borderRadius: 8, overflow: 'hidden', background: '#000', border: `2px solid ${m.uid === myUid ? '#00bcd4' : '#3fb950'}` }} />
-              ) : (
-                <div style={{ position: 'relative', width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, flexShrink: 0,
-                  background: m.uid === myUid ? 'rgba(0,188,212,0.2)' : 'rgba(63,185,80,0.15)',
-                  color:      m.uid === myUid ? '#00bcd4' : '#3fb950',
-                  border:    `2px solid ${m.uid === myUid ? '#00bcd4' : '#3fb950'}`,
-                  opacity: m.muted ? 0.5 : 1 }}>
-                  {m.name[0]?.toUpperCase()}
-                  {m.muted && <span style={{ position: 'absolute', top: -4, right: -4, fontSize: 10 }}>🔇</span>}
-                  <span style={{ position: 'absolute', bottom: -1, right: -1, width: 10, height: 10, borderRadius: '50%', background: '#3fb950', border: '2px solid #161b22' }} />
-                </div>
-              )}
+              <div id={`vc-${m.uid}`} style={{
+                width: 80, height: 56, borderRadius: 8, overflow: 'hidden', background: '#000',
+                border: `2px solid ${m.uid === myUid ? '#00bcd4' : '#3fb950'}`
+              }} />
               <span style={{ fontSize: 9, maxWidth: 48, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#8b949e', textAlign: 'center' }}>
                 {m.uid === myUid ? 'あなた' : m.name}
               </span>
