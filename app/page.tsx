@@ -16,10 +16,16 @@ interface Message {
   dm_to: string | null; group_id: string | null; server_id: number | null; edited?: boolean
 }
 interface Friendship { id: string; requester_id: string; addressee_id: string; status: string }
-interface FriendUser { id: string; username: string }
+interface FriendUser { id: string; username: string; display_name?: string; bio?: string }
 interface Group { id: string; name: string; owner_id: string }
+interface ProfileData { id: string; username: string; display_name: string; bio: string; presence?: Presence; isOwn?: boolean }
 type Tab = 'all' | 'friends' | 'groups'
 type ChatType = 'global' | 'dm' | 'group'
+
+function avatarColor(name: string) {
+  const colors = ['#5865f2','#eb459e','#3ba55d','#faa81a','#ed4245','#00bcd4','#f0883e']
+  return colors[(name || '?').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % colors.length]
+}
 
 const ADMIN = 'user'
 const ONLINE_MS = 2 * 60 * 1000
@@ -72,6 +78,12 @@ export default function Page() {
   const [inviteInput, setInviteInput]     = useState('')
   const [inviteError, setInviteError]     = useState('')
   const [friendsView, setFriendsView]     = useState<'online'|'all'|'pending'|'add'>('online')
+  const [userHandle, setUserHandle]       = useState('')
+  const [userBio, setUserBio]             = useState('')
+  const [viewProfile, setViewProfile]     = useState<ProfileData | null>(null)
+  const [editingProfile, setEditingProfile] = useState(false)
+  const [editDispName, setEditDispName]   = useState('')
+  const [editBio, setEditBio]             = useState('')
 
   const userIdRef    = useRef('')
   const userNameRef  = useRef('')
@@ -86,8 +98,16 @@ export default function Page() {
 
   useEffect(() => {
     const uid = initUserId(); userIdRef.current = uid
-    const name = localStorage.getItem('gf_name') ?? ''
-    if (name) { userNameRef.current = name; setUserName(name); setReady(true) }
+    const name   = localStorage.getItem('gf_name') ?? ''
+    const handle = localStorage.getItem('gf_handle') ?? ''
+    if (name) {
+      userNameRef.current = name; setUserName(name)
+      setUserHandle(handle || name)
+      supabase.from('users').select('bio').eq('id', uid).single().then(({ data }) => {
+        if (data?.bio) setUserBio(data.bio)
+      })
+      setReady(true)
+    }
   }, [])
   useEffect(() => {
     const check = () => setIsDesktop(window.innerWidth >= 768)
@@ -119,7 +139,7 @@ export default function Page() {
     setFriends(data)
     const ids = data.map(f => f.requester_id === uid ? f.addressee_id : f.requester_id)
     if (!ids.length) return
-    const { data: users } = await supabase.from('users').select('*').in('id', ids)
+    const { data: users } = await supabase.from('users').select('id,username,display_name,bio').in('id', ids)
     if (users) { const m: Record<string, FriendUser> = {}; users.forEach(u => { m[u.id] = u }); setFriendUsers(m) }
   }, [])
 
@@ -202,16 +222,20 @@ export default function Page() {
     userIdRef.current = crypto.randomUUID(); localStorage.setItem('gf_uid', userIdRef.current)
   }
   const handleSetup = async () => {
-    const raw = nameInput.trim().slice(0, 16); if (!raw) return
+    const raw = nameInput.trim().slice(0, 16)
+    if (!raw) return
+    if (raw.length < 3) { setNameError('3文字以上で入力してください'); return }
     const uid = userIdRef.current
     const { data: ban } = await supabase.from('bans').select('user_id').eq('user_id', uid).single()
     if (ban) { setNameError('このアカウントはBANされています'); return }
     const { data: ex } = await supabase.from('users').select('id').eq('username', raw).single()
-    if (ex && ex.id !== uid) { setNameError('この名前はすでに使われています'); return }
+    if (ex && ex.id !== uid) { setNameError('このIDはすでに使われています'); return }
     const modded = moderate(raw)
-    await supabase.from('users').upsert({ id: uid, username: modded })
-    localStorage.setItem('gf_name', modded); userNameRef.current = modded
-    setUserName(modded); setNameError(''); setReady(true)
+    await supabase.from('users').upsert({ id: uid, username: modded, display_name: modded })
+    localStorage.setItem('gf_handle', modded)
+    localStorage.setItem('gf_name', modded)
+    userNameRef.current = modded
+    setUserName(modded); setUserHandle(modded); setNameError(''); setReady(true)
   }
   const sendGlobal = async () => {
     const txt = moderate(globalInput.trim()); if (!txt) return
@@ -304,7 +328,28 @@ export default function Page() {
   }
 
   const getFId   = (f: Friendship) => f.requester_id === userIdRef.current ? f.addressee_id : f.requester_id
-  const getFName = (id: string) => friendUsers[id]?.username ?? '...'
+  const getFName = (id: string) => { const u = friendUsers[id]; return u ? (u.display_name || u.username) : '...' }
+
+  const openProfile = async (targetId: string) => {
+    const { data } = await supabase.from('users').select('*').eq('id', targetId).single()
+    if (!data) return
+    const presence = presences.find(p => p.id === targetId)
+    const isOwn = targetId === userIdRef.current
+    const dn = data.display_name || data.username
+    setViewProfile({ id: targetId, username: data.username, display_name: dn, bio: data.bio || '', presence, isOwn })
+    if (isOwn) { setEditDispName(dn); setEditBio(data.bio || '') }
+    setEditingProfile(false)
+  }
+  const saveProfile = async () => {
+    const uid = userIdRef.current
+    const dn  = moderate(editDispName.trim()).slice(0, 32); if (!dn) return
+    const bio = moderate(editBio.trim()).slice(0, 200)
+    await supabase.from('users').update({ display_name: dn, bio }).eq('id', uid)
+    localStorage.setItem('gf_name', dn); userNameRef.current = dn
+    setUserName(dn); setUserBio(bio); upsert()
+    setEditingProfile(false)
+    setViewProfile(prev => prev ? { ...prev, display_name: dn, bio } : null)
+  }
   const online   = presences.filter(p => p.id !== userIdRef.current && isOnlineP(p) && p.server === server)
   const pending  = friends.filter(f => f.status === 'pending' && f.addressee_id === userIdRef.current)
   const accepted     = friends.filter(f => f.status === 'accepted')
@@ -319,9 +364,9 @@ export default function Page() {
       <div style={{ width: '100%', maxWidth: 360, background: CARD, border: `1px solid ${BD}`, borderRadius: 20, padding: 32 }}>
         <div style={{ fontSize: 40, textAlign: 'center', marginBottom: 8 }}>🎮</div>
         <h1 style={{ color: ACC, fontWeight: 700, fontSize: 20, textAlign: 'center', marginBottom: 4 }}>ゲーム友達SNS</h1>
-        <p style={{ color: MUT, fontSize: 13, textAlign: 'center', marginBottom: 24 }}>ニックネームを決めよう（世界で一つだけ）</p>
+        <p style={{ color: MUT, fontSize: 13, textAlign: 'center', marginBottom: 24 }}>IDを決めよう（3〜16文字・変更不可）</p>
         <input value={nameInput} onChange={e => { setNameInput(e.target.value); setNameError('') }}
-          onKeyDown={e => e.key === 'Enter' && handleSetup()} placeholder="名前（最大16文字）" maxLength={16}
+          onKeyDown={e => e.key === 'Enter' && handleSetup()} placeholder="ID（3〜16文字）" maxLength={16}
           style={{ width: '100%', background: BG, border: `1px solid ${BD}`, borderRadius: 10, padding: '12px 16px', color: TXT, fontSize: 14, outline: 'none', boxSizing: 'border-box', marginBottom: 8 }} />
         {nameError && <p style={{ color: '#f85149', fontSize: 12, marginBottom: 8 }}>{nameError}</p>}
         <button onClick={handleSetup} style={{ width: '100%', background: ACC, color: BG, fontWeight: 700, fontSize: 14, padding: '12px 0', borderRadius: 10, border: 'none', cursor: 'pointer', marginTop: 4 }}>
@@ -359,7 +404,7 @@ export default function Page() {
             {online.map(p => (
               <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', borderRadius: 8 }}>
                 <div style={{ position: 'relative', flexShrink: 0 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 }}>
+                  <div onClick={() => openProfile(p.id)} style={{ width: 34, height: 34, borderRadius: '50%', background: avatarColor(p.name || '?'), color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
                     {p.name?.[0]?.toUpperCase()}
                   </div>
                   <span style={{ position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: '50%', background: '#3fb950', border: '2px solid ' + CARD }} />
@@ -430,7 +475,7 @@ export default function Page() {
                 <button key={f.id} onClick={() => openDm(fid)}
                   style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: 8, background: active ? 'rgba(0,188,212,0.15)' : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left', marginBottom: 1 }}>
                   <div style={{ position: 'relative', flexShrink: 0 }}>
-                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15 }}>
+                    <div onClick={e => { e.stopPropagation(); openProfile(fid) }} style={{ width: 36, height: 36, borderRadius: '50%', background: avatarColor(fname), color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
                       {fname[0]?.toUpperCase()}
                     </div>
                     <span style={{ position: 'absolute', bottom: 0, right: 0, width: 11, height: 11, borderRadius: '50%', background: on ? '#3fb950' : '#6e7681', border: '2px solid ' + CARD }} />
@@ -486,15 +531,15 @@ export default function Page() {
 
       {/* User bar - Discord style */}
       <div style={{ borderTop: `1px solid ${BD}`, padding: '8px 8px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, background: '#111618' }}>
-        <div style={{ position: 'relative', flexShrink: 0 }}>
-          <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(0,188,212,0.2)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 }}>
+        <div style={{ position: 'relative', flexShrink: 0, cursor: 'pointer' }} onClick={() => openProfile(userIdRef.current)}>
+          <div style={{ width: 34, height: 34, borderRadius: '50%', background: avatarColor(userHandle || userName), color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 }}>
             {userName[0]?.toUpperCase()}
           </div>
           <span style={{ position: 'absolute', bottom: 0, right: 0, width: 11, height: 11, borderRadius: '50%', background: '#3fb950', border: '2px solid #111618' }} />
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => openProfile(userIdRef.current)}>
           <p style={{ fontSize: 13, fontWeight: 700, color: TXT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{userName}</p>
-          <p style={{ fontSize: 11, color: '#3fb950' }}>オンライン</p>
+          <p style={{ fontSize: 11, color: MUT }}>@{userHandle}</p>
         </div>
         <button onClick={handleLogout} title="ログアウト"
           style={{ width: 30, height: 30, background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: MUT, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, flexShrink: 0 }}>🚪</button>
@@ -529,17 +574,17 @@ export default function Page() {
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {chatType === 'global' && <>
           {globalMsgs.length === 0 && <p style={{ textAlign: 'center', color: MUT, fontSize: 12, paddingTop: 32 }}>まだメッセージがないよ</p>}
-          {globalMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} isAdmin={isAdmin} onDelete={deleteMsg} onEdit={editMsg} />)}
+          {globalMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} isAdmin={isAdmin} onDelete={deleteMsg} onEdit={editMsg} onAvatarClick={openProfile} />)}
           <div ref={globalEndRef} />
         </>}
         {chatType === 'dm' && <>
           {dmMsgs.length === 0 && <p style={{ textAlign: 'center', color: MUT, fontSize: 12, paddingTop: 32 }}>まだメッセージがないよ</p>}
-          {dmMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} isAdmin={isAdmin} onDelete={deleteMsg} onEdit={editMsg} />)}
+          {dmMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} isAdmin={isAdmin} onDelete={deleteMsg} onEdit={editMsg} onAvatarClick={openProfile} />)}
           <div ref={dmEndRef} />
         </>}
         {chatType === 'group' && <>
           {groupMsgs.length === 0 && <p style={{ textAlign: 'center', color: MUT, fontSize: 12, paddingTop: 32 }}>まだメッセージがないよ</p>}
-          {groupMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} isAdmin={isAdmin} onDelete={deleteMsg} onEdit={editMsg} />)}
+          {groupMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} isAdmin={isAdmin} onDelete={deleteMsg} onEdit={editMsg} onAvatarClick={openProfile} />)}
           <div ref={groupEndRef} />
         </>}
       </div>
@@ -561,6 +606,77 @@ export default function Page() {
       </div>
     </div>
   )
+
+  // ── Profile modal ─────────────────────────────────────────
+  const ProfileModal = viewProfile ? (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+      onClick={() => setViewProfile(null)}>
+      <div style={{ width: 340, background: '#1e2530', borderRadius: 20, overflow: 'hidden', boxShadow: '0 16px 48px rgba(0,0,0,0.7)' }}
+        onClick={e => e.stopPropagation()}>
+        {/* Banner */}
+        <div style={{ height: 90, background: `linear-gradient(135deg, ${avatarColor(viewProfile.username)}, ${avatarColor(viewProfile.username)}66)`, position: 'relative' }}>
+          <button onClick={() => setViewProfile(null)}
+            style={{ position: 'absolute', top: 10, right: 10, background: 'rgba(0,0,0,0.3)', border: 'none', borderRadius: '50%', width: 28, height: 28, color: 'white', cursor: 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+        </div>
+        {/* Avatar */}
+        <div style={{ padding: '0 20px', marginTop: -44 }}>
+          <div style={{ width: 88, height: 88, borderRadius: '50%', background: avatarColor(viewProfile.username), color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 36, border: '5px solid #1e2530' }}>
+            {(viewProfile.display_name || viewProfile.username)?.[0]?.toUpperCase()}
+          </div>
+        </div>
+        {/* Info */}
+        <div style={{ padding: '10px 20px 20px' }}>
+          {viewProfile.isOwn && editingProfile ? (
+            <div style={{ marginBottom: 4 }}>
+              <input value={editDispName} onChange={e => setEditDispName(e.target.value)} maxLength={32}
+                style={{ width: '100%', background: '#0d1117', border: `1px solid ${ACC}`, borderRadius: 8, padding: '6px 10px', color: TXT, fontSize: 18, fontWeight: 700, outline: 'none', boxSizing: 'border-box' }} />
+            </div>
+          ) : (
+            <p style={{ fontSize: 22, fontWeight: 800, color: TXT, marginBottom: 2 }}>{viewProfile.display_name || viewProfile.username}</p>
+          )}
+          <p style={{ fontSize: 13, color: MUT, marginBottom: 12 }}>@{viewProfile.username}</p>
+
+          {/* Bio */}
+          <div style={{ background: '#0d1117', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+            <p style={{ fontSize: 10, fontWeight: 700, color: MUT, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>プロフィール</p>
+            {viewProfile.isOwn && editingProfile ? (
+              <textarea value={editBio} onChange={e => setEditBio(e.target.value)} maxLength={200} rows={3}
+                style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', color: TXT, fontSize: 13, resize: 'none', boxSizing: 'border-box' }} />
+            ) : (
+              <p style={{ fontSize: 13, color: viewProfile.bio ? TXT : MUT }}>{viewProfile.bio || 'プロフィール未設定'}</p>
+            )}
+          </div>
+
+          {/* Status */}
+          {viewProfile.presence && (viewProfile.presence.game || viewProfile.presence.status) && (
+            <div style={{ background: '#0d1117', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: MUT, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>アクティビティ</p>
+              {viewProfile.presence.game && <p style={{ fontSize: 13, color: TXT, marginBottom: 2 }}>🎮 {viewProfile.presence.game}</p>}
+              {viewProfile.presence.status && <p style={{ fontSize: 12, color: MUT }}>{viewProfile.presence.status}</p>}
+            </div>
+          )}
+
+          {/* Actions */}
+          {viewProfile.isOwn ? (
+            editingProfile ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={saveProfile}
+                  style={{ flex: 1, background: ACC, color: BG, border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>保存</button>
+                <button onClick={() => setEditingProfile(false)}
+                  style={{ flex: 1, background: '#30363d', color: TXT, border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>キャンセル</button>
+              </div>
+            ) : (
+              <button onClick={() => setEditingProfile(true)}
+                style={{ width: '100%', background: '#30363d', color: TXT, border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>✏️ プロフィールを編集</button>
+            )
+          ) : (
+            <button onClick={() => { openDm(viewProfile.id); setViewProfile(null) }}
+              style={{ width: '100%', background: ACC, color: BG, border: 'none', borderRadius: 10, padding: '10px 0', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>💬 メッセージを送る</button>
+          )}
+        </div>
+      </div>
+    </div>
+  ) : null
 
   // ── Friends main area (Discord style) ───────────────────────
   const FriendsMainArea = (
@@ -667,6 +783,7 @@ export default function Page() {
   // ── DESKTOP layout ────────────────────────────────────────
   if (isDesktop) return (
     <div style={{ height: '100dvh', display: 'flex', background: BG }}>
+    {ProfileModal}
 
       {/* Icon sidebar */}
       <div style={{ width: 60, background: SIDE, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', gap: 6, borderRight: `1px solid ${BD}`, flexShrink: 0 }}>
@@ -717,6 +834,7 @@ export default function Page() {
 
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', background: BG }}>
+      {ProfileModal}
       {/* Mobile header */}
       <div style={{ background: CARD, borderBottom: `1px solid ${BD}`, flexShrink: 0, zIndex: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px 8px' }}>
@@ -819,18 +937,21 @@ export default function Page() {
   )
 }
 
-function Bubble({ m, myId, isAdmin, onDelete, onEdit }: {
+function Bubble({ m, myId, isAdmin, onDelete, onEdit, onAvatarClick }: {
   m: Message; myId: string; isAdmin: boolean
   onDelete: (id: string) => void; onEdit: (id: string, content: string) => void
+  onAvatarClick: (uid: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [editVal, setEditVal] = useState(m.content)
   const me = m.user_id === myId
-  const system = m.user_id === 'system' || m.user_name.startsWith('⚠️')
+  const system = m.user_id === 'system' || (m.user_name?.startsWith('⚠️') ?? false)
+  const color = system ? '#f0883e' : avatarColor(m.user_name || '?')
 
   return (
     <div style={{ display: 'flex', gap: 8, flexDirection: me ? 'row-reverse' : 'row' }}>
-      <div style={{ width: 28, height: 28, borderRadius: '50%', background: system ? 'rgba(240,136,62,0.2)' : me ? 'rgba(0,188,212,0.2)' : '#30363d', color: system ? '#f0883e' : me ? ACC : MUT, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+      <div onClick={() => !system && onAvatarClick(m.user_id)}
+        style={{ width: 32, height: 32, borderRadius: '50%', background: color, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0, cursor: system ? 'default' : 'pointer' }}>
         {m.user_name?.[0]?.toUpperCase()}
       </div>
       <div style={{ maxWidth: '75%', display: 'flex', flexDirection: 'column', gap: 2, alignItems: me ? 'flex-end' : 'flex-start' }}>
