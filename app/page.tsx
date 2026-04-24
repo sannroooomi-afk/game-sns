@@ -245,10 +245,9 @@ export default function Page() {
     const txt = moderate(globalInput.trim()); if (!txt) return
     setGlobalInput('')
     const tempId = `~${Date.now()}`
-    const temp: Message = { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current, created_at: new Date().toISOString() }
-    setGlobalMsgs(p => [...p, temp])
-    const { data } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current }).select().single()
-    setGlobalMsgs(p => { const w = p.filter(m => m.id !== tempId); return data ? (w.some(m => m.id === data.id) ? w : [...w, data]) : w })
+    setGlobalMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current, created_at: new Date().toISOString() }])
+    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current })
+    loadGlobal(serverRef.current)
   }
   const sendFriendReq = async () => {
     const target = addInput.trim(); if (!target) return; setAddError('')
@@ -272,11 +271,12 @@ export default function Page() {
   const sendDm = async () => {
     const txt = moderate(dmInput.trim()); if (!txt || !selFriend) return
     setDmInput('')
+    const sf = selFriend; const uid = userIdRef.current
     const tempId = `~${Date.now()}`
-    const temp: Message = { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: selFriend, group_id: null, server_id: null, created_at: new Date().toISOString() }
-    setDmMsgs(p => [...p, temp])
-    const { data } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: selFriend }).select().single()
-    setDmMsgs(p => { const w = p.filter(m => m.id !== tempId); return data ? (w.some(m => m.id === data.id) ? w : [...w, data]) : w })
+    setDmMsgs(p => [...p, { id: tempId, user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf, group_id: null, server_id: null, created_at: new Date().toISOString() }])
+    await supabase.from('messages').insert({ user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf })
+    const { data } = await supabase.from('messages').select('*').or(`and(user_id.eq.${uid},dm_to.eq.${sf}),and(user_id.eq.${sf},dm_to.eq.${uid})`).order('created_at').limit(100)
+    if (data) setDmMsgs(data)
   }
   const createGroup = async () => {
     const name = newGroupName.trim(); if (!name) return
@@ -294,11 +294,12 @@ export default function Page() {
   const sendGroupMsg = async () => {
     const txt = moderate(groupInput.trim()); if (!txt || !selGroup) return
     setGroupInput('')
+    const sg = selGroup
     const tempId = `~${Date.now()}`
-    const temp: Message = { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: selGroup, server_id: null, created_at: new Date().toISOString() }
-    setGroupMsgs(p => [...p, temp])
-    const { data } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: selGroup }).select().single()
-    setGroupMsgs(p => { const w = p.filter(m => m.id !== tempId); return data ? (w.some(m => m.id === data.id) ? w : [...w, data]) : w })
+    setGroupMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: sg, server_id: null, created_at: new Date().toISOString() }])
+    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg })
+    const { data } = await supabase.from('messages').select('*').eq('group_id', sg).order('created_at').limit(100)
+    if (data) setGroupMsgs(data)
   }
   const deleteMsg = async (msgId: string) => {
     await supabase.from('messages').delete().eq('id', msgId)
