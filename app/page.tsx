@@ -178,12 +178,16 @@ export default function Page() {
       ({ eventType, new: n, old: o }) => {
         if (eventType === 'INSERT') {
           const msg = n as Message
-          const dedup = (prev: Message[]) => prev.some(m => m.id === msg.id) ? prev : [...prev, msg]
-          if (!msg.dm_to && !msg.group_id && msg.server_id === serverRef.current) setGlobalMsgs(dedup)
+          // Replace matching temp message (same user+content) OR dedup by real ID
+          const addMsg = (prev: Message[]) => {
+            const withoutTemp = prev.filter(m => !(m.id.startsWith('~') && m.user_id === msg.user_id && m.content === msg.content))
+            return withoutTemp.some(m => m.id === msg.id) ? withoutTemp : [...withoutTemp, msg]
+          }
+          if (!msg.dm_to && !msg.group_id && msg.server_id === serverRef.current) setGlobalMsgs(addMsg)
           else if (msg.dm_to && (msg.user_id === uid || msg.dm_to === uid)) {
             const other = msg.user_id === uid ? msg.dm_to : msg.user_id
-            if (selFriendRef.current === other) setDmMsgs(dedup)
-          } else if (msg.group_id && msg.group_id === selGroupRef.current) setGroupMsgs(dedup)
+            if (selFriendRef.current === other) setDmMsgs(addMsg)
+          } else if (msg.group_id && msg.group_id === selGroupRef.current) setGroupMsgs(addMsg)
         } else if (eventType === 'UPDATE') {
           const msg = n as Message
           const upd = (msgs: Message[]) => msgs.map(m => m.id === msg.id ? { ...m, content: msg.content, edited: msg.edited } : m)
@@ -246,8 +250,8 @@ export default function Page() {
     setGlobalInput('')
     const tempId = `~${Date.now()}`
     setGlobalMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current, created_at: new Date().toISOString() }])
-    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current })
-    loadGlobal(serverRef.current)
+    const { error } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current })
+    if (error) setGlobalMsgs(p => p.filter(m => m.id !== tempId))
   }
   const sendFriendReq = async () => {
     const target = addInput.trim(); if (!target) return; setAddError('')
@@ -274,9 +278,8 @@ export default function Page() {
     const sf = selFriend; const uid = userIdRef.current
     const tempId = `~${Date.now()}`
     setDmMsgs(p => [...p, { id: tempId, user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf, group_id: null, server_id: null, created_at: new Date().toISOString() }])
-    await supabase.from('messages').insert({ user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf })
-    const { data } = await supabase.from('messages').select('*').or(`and(user_id.eq.${uid},dm_to.eq.${sf}),and(user_id.eq.${sf},dm_to.eq.${uid})`).order('created_at').limit(100)
-    if (data) setDmMsgs(data)
+    const { error } = await supabase.from('messages').insert({ user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf })
+    if (error) setDmMsgs(p => p.filter(m => m.id !== tempId))
   }
   const createGroup = async () => {
     const name = newGroupName.trim(); if (!name) return
@@ -297,9 +300,8 @@ export default function Page() {
     const sg = selGroup
     const tempId = `~${Date.now()}`
     setGroupMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: sg, server_id: null, created_at: new Date().toISOString() }])
-    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg })
-    const { data } = await supabase.from('messages').select('*').eq('group_id', sg).order('created_at').limit(100)
-    if (data) setGroupMsgs(data)
+    const { error } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg })
+    if (error) setGroupMsgs(p => p.filter(m => m.id !== tempId))
   }
   const deleteMsg = async (msgId: string) => {
     await supabase.from('messages').delete().eq('id', msgId)
