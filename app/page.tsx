@@ -252,16 +252,12 @@ export default function Page() {
     const tempId = `~${Date.now()}_${txt.slice(0, 10)}`
     setGlobalMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current, created_at: new Date().toISOString() }])
     setIsSending(true)
+    const resetTimer = setTimeout(() => setIsSending(false), 8000)
     try {
-      const tout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
-      const { data, error } = await Promise.race([Promise.resolve(supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current }).select().single()), tout])
-      if (error) throw error
-      if (data) setGlobalMsgs(prev => { const without = prev.filter(m => m.id !== tempId); return without.some(m => m.id === data.id) ? without : [...without, data] })
-    } catch (e) {
-      console.error('sendGlobal error:', e)
-      setGlobalInput(txt)
-      setGlobalMsgs(prev => prev.filter(m => m.id !== tempId))
+      const { error } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current })
+      if (error) console.error('sendGlobal error:', error)
     } finally {
+      clearTimeout(resetTimer)
       setIsSending(false)
     }
   }
@@ -291,16 +287,12 @@ export default function Page() {
     const tempId = `~${Date.now()}_${txt.slice(0, 10)}`
     setDmMsgs(p => [...p, { id: tempId, user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf, group_id: null, server_id: null, created_at: new Date().toISOString() }])
     setIsSending(true)
+    const resetTimer = setTimeout(() => setIsSending(false), 8000)
     try {
-      const tout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
-      const { data, error } = await Promise.race([Promise.resolve(supabase.from('messages').insert({ user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf }).select().single()), tout])
-      if (error) throw error
-      if (data) setDmMsgs(prev => { const without = prev.filter(m => m.id !== tempId); return without.some(m => m.id === data.id) ? without : [...without, data] })
-    } catch (e) {
-      console.error('sendDm error:', e)
-      setDmInput(txt)
-      setDmMsgs(prev => prev.filter(m => m.id !== tempId))
+      const { error } = await supabase.from('messages').insert({ user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf })
+      if (error) console.error('sendDm error:', error)
     } finally {
+      clearTimeout(resetTimer)
       setIsSending(false)
     }
   }
@@ -324,16 +316,12 @@ export default function Page() {
     const tempId = `~${Date.now()}_${txt.slice(0, 10)}`
     setGroupMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: sg, server_id: null, created_at: new Date().toISOString() }])
     setIsSending(true)
+    const resetTimer = setTimeout(() => setIsSending(false), 8000)
     try {
-      const tout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
-      const { data, error } = await Promise.race([Promise.resolve(supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg }).select().single()), tout])
-      if (error) throw error
-      if (data) setGroupMsgs(prev => { const without = prev.filter(m => m.id !== tempId); return without.some(m => m.id === data.id) ? without : [...without, data] })
-    } catch (e) {
-      console.error('sendGroupMsg error:', e)
-      setGroupInput(txt)
-      setGroupMsgs(prev => prev.filter(m => m.id !== tempId))
+      const { error } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg })
+      if (error) console.error('sendGroupMsg error:', error)
     } finally {
+      clearTimeout(resetTimer)
       setIsSending(false)
     }
   }
