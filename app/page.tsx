@@ -178,11 +178,12 @@ export default function Page() {
       ({ eventType, new: n, old: o }) => {
         if (eventType === 'INSERT') {
           const msg = n as Message
-          if (!msg.dm_to && !msg.group_id && msg.server_id === serverRef.current) setGlobalMsgs(p => [...p, msg])
+          const dedup = (prev: Message[]) => prev.some(m => m.id === msg.id) ? prev : [...prev, msg]
+          if (!msg.dm_to && !msg.group_id && msg.server_id === serverRef.current) setGlobalMsgs(dedup)
           else if (msg.dm_to && (msg.user_id === uid || msg.dm_to === uid)) {
             const other = msg.user_id === uid ? msg.dm_to : msg.user_id
-            if (selFriendRef.current === other) setDmMsgs(p => [...p, msg])
-          } else if (msg.group_id && msg.group_id === selGroupRef.current) setGroupMsgs(p => [...p, msg])
+            if (selFriendRef.current === other) setDmMsgs(dedup)
+          } else if (msg.group_id && msg.group_id === selGroupRef.current) setGroupMsgs(dedup)
         } else if (eventType === 'UPDATE') {
           const msg = n as Message
           const upd = (msgs: Message[]) => msgs.map(m => m.id === msg.id ? { ...m, content: msg.content, edited: msg.edited } : m)
@@ -197,7 +198,10 @@ export default function Page() {
 
     const fSub = supabase.channel('friend-rt').on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => loadFriends()).subscribe()
     const gSub = supabase.channel('grpmem-rt').on('postgres_changes', { event: '*', schema: 'public', table: 'group_members' },
-      ({ new: n }) => { if ((n as any)?.user_id === uid) loadGroups() }).subscribe()
+      ({ eventType, new: n, old: o }) => {
+        const row = (eventType === 'DELETE' ? o : n) as any
+        if (row?.user_id === uid) loadGroups()
+      }).subscribe()
 
     upsert(); timerRef.current = setInterval(() => upsert(), 60_000)
     return () => { pSub.unsubscribe(); mSub.unsubscribe(); fSub.unsubscribe(); gSub.unsubscribe(); if (timerRef.current) clearInterval(timerRef.current) }
@@ -207,7 +211,7 @@ export default function Page() {
   const handleLogout = async () => {
     const uid = userIdRef.current
     if (timerRef.current) clearInterval(timerRef.current)
-    localStorage.removeItem('gf_name'); localStorage.removeItem('gf_uid')
+    localStorage.removeItem('gf_name'); localStorage.removeItem('gf_uid'); localStorage.removeItem('gf_handle')
     userNameRef.current = ''
     await Promise.all([
       supabase.from('messages').delete().eq('user_id', uid),
@@ -239,13 +243,14 @@ export default function Page() {
   }
   const sendGlobal = async () => {
     const txt = moderate(globalInput.trim()); if (!txt) return
-    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current })
     setGlobalInput('')
+    const { data } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current }).select().single()
+    if (data) setGlobalMsgs(p => p.some(m => m.id === data.id) ? p : [...p, data])
   }
   const sendFriendReq = async () => {
     const target = addInput.trim(); if (!target) return; setAddError('')
     const uid = userIdRef.current
-    if (target === userNameRef.current) { setAddError('自分には送れないよ'); return }
+    if (target === userHandle) { setAddError('自分には送れないよ'); return }
     const { data: tu } = await supabase.from('users').select('*').eq('username', target).single()
     if (!tu) { setAddError('ユーザーが見つかりません'); return }
     const { data: ex } = await supabase.from('friendships').select('id').or(`and(requester_id.eq.${uid},addressee_id.eq.${tu.id}),and(requester_id.eq.${tu.id},addressee_id.eq.${uid})`)
@@ -263,7 +268,9 @@ export default function Page() {
   }
   const sendDm = async () => {
     const txt = moderate(dmInput.trim()); if (!txt || !selFriend) return
-    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: selFriend }); setDmInput('')
+    setDmInput('')
+    const { data } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: selFriend }).select().single()
+    if (data) setDmMsgs(p => p.some(m => m.id === data.id) ? p : [...p, data])
   }
   const createGroup = async () => {
     const name = newGroupName.trim(); if (!name) return
@@ -280,7 +287,9 @@ export default function Page() {
   }
   const sendGroupMsg = async () => {
     const txt = moderate(groupInput.trim()); if (!txt || !selGroup) return
-    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: selGroup }); setGroupInput('')
+    setGroupInput('')
+    const { data } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: selGroup }).select().single()
+    if (data) setGroupMsgs(p => p.some(m => m.id === data.id) ? p : [...p, data])
   }
   const deleteMsg = async (msgId: string) => {
     await supabase.from('messages').delete().eq('id', msgId)
