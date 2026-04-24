@@ -360,7 +360,7 @@ export default function Page() {
               <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', borderRadius: 8 }}>
                 <div style={{ position: 'relative', flexShrink: 0 }}>
                   <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 }}>
-                    {p.name[0]?.toUpperCase()}
+                    {p.name?.[0]?.toUpperCase()}
                   </div>
                   <span style={{ position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: '50%', background: '#3fb950', border: '2px solid ' + CARD }} />
                 </div>
@@ -463,7 +463,7 @@ export default function Page() {
                 <button key={g.id} onClick={() => openGroup(g.id)}
                   style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: active ? 'rgba(0,188,212,0.1)' : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left', marginBottom: 2 }}>
                   <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
-                    {g.name[0]?.toUpperCase()}
+                    {g.name?.[0]?.toUpperCase()}
                   </div>
                   <div>
                     <p style={{ fontSize: 13, fontWeight: 600, color: active ? ACC : TXT }}>{g.name}</p>
@@ -550,7 +550,7 @@ export default function Page() {
           <input
             value={chatType === 'global' ? globalInput : chatType === 'dm' ? dmInput : groupInput}
             onChange={e => chatType === 'global' ? setGlobalInput(e.target.value) : chatType === 'dm' ? setDmInput(e.target.value) : setGroupInput(e.target.value)}
-            onKeyDown={e => { if (e.key !== 'Enter' || e.shiftKey) return; chatType === 'global' ? sendGlobal() : chatType === 'dm' ? sendDm() : sendGroupMsg() }}
+            onKeyDown={e => { if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return; chatType === 'global' ? sendGlobal() : chatType === 'dm' ? sendDm() : sendGroupMsg() }}
             placeholder={`${chatTitle} にメッセージを送信`}
             style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: TXT, fontSize: 14, padding: '8px 0' }} />
           <button onClick={chatType === 'global' ? sendGlobal : chatType === 'dm' ? sendDm : sendGroupMsg}
@@ -777,7 +777,7 @@ export default function Page() {
                   {online.map(p => (
                     <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderRadius: 12, background: CARD, border: `1px solid ${p.recruiting ? '#3fb950' : BD}`, marginBottom: 6 }}>
                       <div style={{ position: 'relative', flexShrink: 0 }}>
-                        <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15 }}>{p.name[0]?.toUpperCase()}</div>
+                        <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'rgba(0,188,212,0.15)', color: ACC, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15 }}>{p.name?.[0]?.toUpperCase()}</div>
                         <span style={{ position: 'absolute', bottom: 0, right: 0, width: 11, height: 11, borderRadius: '50%', background: '#3fb950', border: '2px solid ' + CARD }} />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -831,7 +831,7 @@ function Bubble({ m, myId, isAdmin, onDelete, onEdit }: {
   return (
     <div style={{ display: 'flex', gap: 8, flexDirection: me ? 'row-reverse' : 'row' }}>
       <div style={{ width: 28, height: 28, borderRadius: '50%', background: system ? 'rgba(240,136,62,0.2)' : me ? 'rgba(0,188,212,0.2)' : '#30363d', color: system ? '#f0883e' : me ? ACC : MUT, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
-        {m.user_name[0]?.toUpperCase()}
+        {m.user_name?.[0]?.toUpperCase()}
       </div>
       <div style={{ maxWidth: '75%', display: 'flex', flexDirection: 'column', gap: 2, alignItems: me ? 'flex-end' : 'flex-start' }}>
         <span style={{ fontSize: 10, color: MUT, padding: '0 4px' }}>{m.user_name}</span>
