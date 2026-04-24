@@ -250,8 +250,7 @@ export default function Page() {
     setGlobalInput('')
     const tempId = `~${Date.now()}`
     setGlobalMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current, created_at: new Date().toISOString() }])
-    const { error } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current })
-    if (error) setGlobalMsgs(p => p.filter(m => m.id !== tempId))
+    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current })
   }
   const sendFriendReq = async () => {
     const target = addInput.trim(); if (!target) return; setAddError('')
@@ -278,8 +277,7 @@ export default function Page() {
     const sf = selFriend; const uid = userIdRef.current
     const tempId = `~${Date.now()}`
     setDmMsgs(p => [...p, { id: tempId, user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf, group_id: null, server_id: null, created_at: new Date().toISOString() }])
-    const { error } = await supabase.from('messages').insert({ user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf })
-    if (error) setDmMsgs(p => p.filter(m => m.id !== tempId))
+    await supabase.from('messages').insert({ user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf })
   }
   const createGroup = async () => {
     const name = newGroupName.trim(); if (!name) return
@@ -300,8 +298,7 @@ export default function Page() {
     const sg = selGroup
     const tempId = `~${Date.now()}`
     setGroupMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: sg, server_id: null, created_at: new Date().toISOString() }])
-    const { error } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg })
-    if (error) setGroupMsgs(p => p.filter(m => m.id !== tempId))
+    await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg })
   }
   const deleteMsg = async (msgId: string) => {
     await supabase.from('messages').delete().eq('id', msgId)
