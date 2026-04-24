@@ -244,8 +244,11 @@ export default function Page() {
   const sendGlobal = async () => {
     const txt = moderate(globalInput.trim()); if (!txt) return
     setGlobalInput('')
+    const tempId = `~${Date.now()}`
+    const temp: Message = { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current, created_at: new Date().toISOString() }
+    setGlobalMsgs(p => [...p, temp])
     const { data } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current }).select().single()
-    if (data) setGlobalMsgs(p => p.some(m => m.id === data.id) ? p : [...p, data])
+    setGlobalMsgs(p => { const w = p.filter(m => m.id !== tempId); return data ? (w.some(m => m.id === data.id) ? w : [...w, data]) : w })
   }
   const sendFriendReq = async () => {
     const target = addInput.trim(); if (!target) return; setAddError('')
@@ -269,8 +272,11 @@ export default function Page() {
   const sendDm = async () => {
     const txt = moderate(dmInput.trim()); if (!txt || !selFriend) return
     setDmInput('')
+    const tempId = `~${Date.now()}`
+    const temp: Message = { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: selFriend, group_id: null, server_id: null, created_at: new Date().toISOString() }
+    setDmMsgs(p => [...p, temp])
     const { data } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: selFriend }).select().single()
-    if (data) setDmMsgs(p => p.some(m => m.id === data.id) ? p : [...p, data])
+    setDmMsgs(p => { const w = p.filter(m => m.id !== tempId); return data ? (w.some(m => m.id === data.id) ? w : [...w, data]) : w })
   }
   const createGroup = async () => {
     const name = newGroupName.trim(); if (!name) return
@@ -288,8 +294,11 @@ export default function Page() {
   const sendGroupMsg = async () => {
     const txt = moderate(groupInput.trim()); if (!txt || !selGroup) return
     setGroupInput('')
+    const tempId = `~${Date.now()}`
+    const temp: Message = { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: selGroup, server_id: null, created_at: new Date().toISOString() }
+    setGroupMsgs(p => [...p, temp])
     const { data } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: selGroup }).select().single()
-    if (data) setGroupMsgs(p => p.some(m => m.id === data.id) ? p : [...p, data])
+    setGroupMsgs(p => { const w = p.filter(m => m.id !== tempId); return data ? (w.some(m => m.id === data.id) ? w : [...w, data]) : w })
   }
   const deleteMsg = async (msgId: string) => {
     await supabase.from('messages').delete().eq('id', msgId)
@@ -580,36 +589,51 @@ export default function Page() {
       </div>
 
       {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0 4px', display: 'flex', flexDirection: 'column' }}>
         {chatType === 'global' && <>
-          {globalMsgs.length === 0 && <p style={{ textAlign: 'center', color: MUT, fontSize: 12, paddingTop: 32 }}>まだメッセージがないよ</p>}
+          {globalMsgs.length === 0 && (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: 0.5 }}>
+              <span style={{ fontSize: 40 }}>💬</span>
+              <p style={{ color: MUT, fontSize: 13 }}>ここがサーバー{server}の全体チャットだよ</p>
+            </div>
+          )}
           {globalMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} isAdmin={isAdmin} onDelete={deleteMsg} onEdit={editMsg} onAvatarClick={openProfile} />)}
           <div ref={globalEndRef} />
         </>}
         {chatType === 'dm' && <>
-          {dmMsgs.length === 0 && <p style={{ textAlign: 'center', color: MUT, fontSize: 12, paddingTop: 32 }}>まだメッセージがないよ</p>}
+          {dmMsgs.length === 0 && (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: 0.5 }}>
+              <span style={{ fontSize: 40 }}>✉️</span>
+              <p style={{ color: MUT, fontSize: 13 }}>{getFName(selFriend!)} との最初のメッセージを送ろう</p>
+            </div>
+          )}
           {dmMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} isAdmin={isAdmin} onDelete={deleteMsg} onEdit={editMsg} onAvatarClick={openProfile} />)}
           <div ref={dmEndRef} />
         </>}
         {chatType === 'group' && <>
-          {groupMsgs.length === 0 && <p style={{ textAlign: 'center', color: MUT, fontSize: 12, paddingTop: 32 }}>まだメッセージがないよ</p>}
+          {groupMsgs.length === 0 && (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: 0.5 }}>
+              <span style={{ fontSize: 40 }}>👥</span>
+              <p style={{ color: MUT, fontSize: 13 }}>グループの最初のメッセージを送ろう</p>
+            </div>
+          )}
           {groupMsgs.map(m => <Bubble key={m.id} m={m} myId={userIdRef.current} isAdmin={isAdmin} onDelete={deleteMsg} onEdit={editMsg} onAvatarClick={openProfile} />)}
           <div ref={groupEndRef} />
         </>}
       </div>
 
       {/* Input */}
-      <div style={{ padding: '0 16px 16px', flexShrink: 0 }}>
-        <div style={{ display: 'flex', gap: 8, background: '#21262d', borderRadius: 12, padding: '4px 4px 4px 16px', alignItems: 'center' }}>
+      <div style={{ padding: '8px 16px 16px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 0, background: '#21262d', borderRadius: 14, border: `1px solid ${BD}`, alignItems: 'center', overflow: 'hidden' }}>
           <input
             value={chatType === 'global' ? globalInput : chatType === 'dm' ? dmInput : groupInput}
             onChange={e => chatType === 'global' ? setGlobalInput(e.target.value) : chatType === 'dm' ? setDmInput(e.target.value) : setGroupInput(e.target.value)}
             onKeyDown={e => { if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return; chatType === 'global' ? sendGlobal() : chatType === 'dm' ? sendDm() : sendGroupMsg() }}
-            placeholder={`${chatTitle} にメッセージを送信`}
-            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: TXT, fontSize: 14, padding: '8px 0' }} />
+            placeholder={`${chatTitle} にメッセージ…`}
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: TXT, fontSize: 14, padding: '12px 16px' }} />
           <button onClick={chatType === 'global' ? sendGlobal : chatType === 'dm' ? sendDm : sendGroupMsg}
-            style={{ background: ACC, color: BG, border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>
-            送信
+            style={{ background: ACC, color: BG, border: 'none', padding: '12px 20px', fontWeight: 700, fontSize: 13, cursor: 'pointer', flexShrink: 0, letterSpacing: 0.5 }}>
+            ↑
           </button>
         </div>
       </div>
@@ -953,48 +977,86 @@ function Bubble({ m, myId, isAdmin, onDelete, onEdit, onAvatarClick }: {
 }) {
   const [editing, setEditing] = useState(false)
   const [editVal, setEditVal] = useState(m.content)
+  const [hover, setHover] = useState(false)
   const me = m.user_id === myId
   const system = m.user_id === 'system' || (m.user_name?.startsWith('⚠️') ?? false)
+  const isTemp = m.id.startsWith('~')
   const color = system ? '#f0883e' : avatarColor(m.user_name || '?')
+  const time = new Date(m.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+  const canDelete = !isTemp && (me || isAdmin || (!m.dm_to && !m.group_id))
+  const canEdit = !isTemp && me
+
+  if (system) return (
+    <div style={{ padding: '6px 16px', textAlign: 'center' }}>
+      <span style={{ fontSize: 11, color: '#f0883e', background: 'rgba(240,136,62,0.08)', border: '1px solid rgba(240,136,62,0.2)', padding: '4px 14px', borderRadius: 20 }}>{m.content}</span>
+    </div>
+  )
 
   return (
-    <div style={{ display: 'flex', gap: 8, flexDirection: me ? 'row-reverse' : 'row' }}>
-      <div onClick={() => !system && onAvatarClick(m.user_id)}
-        style={{ width: 32, height: 32, borderRadius: '50%', background: color, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0, cursor: system ? 'default' : 'pointer' }}>
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex', gap: 12, padding: '3px 16px',
+        background: hover ? 'rgba(255,255,255,0.025)' : 'transparent',
+        position: 'relative', opacity: isTemp ? 0.6 : 1,
+        transition: 'background 0.1s',
+      }}>
+
+      {/* Avatar */}
+      <div onClick={() => onAvatarClick(m.user_id)}
+        style={{ width: 38, height: 38, borderRadius: '50%', background: color, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, flexShrink: 0, cursor: 'pointer', marginTop: 3 }}>
         {m.user_name?.[0]?.toUpperCase()}
       </div>
-      <div style={{ maxWidth: '75%', display: 'flex', flexDirection: 'column', gap: 2, alignItems: me ? 'flex-end' : 'flex-start' }}>
-        <span style={{ fontSize: 10, color: MUT, padding: '0 4px' }}>{m.user_name}</span>
+
+      {/* Body */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 3 }}>
+          <span style={{ fontWeight: 700, fontSize: 14, color: me ? ACC : TXT }}>{m.user_name}</span>
+          <span style={{ fontSize: 11, color: MUT }}>{time}</span>
+          {m.edited && <span style={{ fontSize: 10, color: MUT, fontStyle: 'italic' }}>(編集済)</span>}
+          {isTemp && <span style={{ fontSize: 10, color: MUT }}>送信中…</span>}
+        </div>
+
         {editing ? (
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <input value={editVal} onChange={e => setEditVal(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { onEdit(m.id, editVal); setEditing(false) } if (e.key === 'Escape') setEditing(false) }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing) { onEdit(m.id, editVal); setEditing(false) }
+                if (e.key === 'Escape') setEditing(false)
+              }}
               autoFocus
-              style={{ background: '#21262d', border: '1px solid ' + ACC, borderRadius: 8, padding: '6px 10px', color: TXT, fontSize: 13, outline: 'none', minWidth: 120 }} />
-            <button onClick={() => { onEdit(m.id, editVal); setEditing(false) }} style={{ background: ACC, color: BG, border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✓</button>
-            <button onClick={() => setEditing(false)} style={{ background: '#30363d', color: MUT, border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}>✕</button>
+              style={{ flex: 1, background: '#161b22', border: `1px solid ${ACC}`, borderRadius: 8, padding: '7px 12px', color: TXT, fontSize: 14, outline: 'none' }} />
+            <button onClick={() => { onEdit(m.id, editVal); setEditing(false) }}
+              style={{ background: ACC, color: BG, border: 'none', borderRadius: 7, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>保存</button>
+            <button onClick={() => setEditing(false)}
+              style={{ background: '#30363d', color: MUT, border: 'none', borderRadius: 7, padding: '6px 12px', fontSize: 12, cursor: 'pointer' }}>✕</button>
           </div>
         ) : (
-          <div style={{ padding: '8px 12px', borderRadius: 16, fontSize: 13, wordBreak: 'break-word', ...(me ? { background: ACC, color: BG, borderTopRightRadius: 4 } : { background: '#21262d', color: TXT, borderTopLeftRadius: 4 }) }}>
-            {m.content}
-            {m.edited && <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 4 }}>(編集済)</span>}
-          </div>
-        )}
-        {!editing && !system && (me || isAdmin || (!m.dm_to && !m.group_id)) && (
-          <div style={{ display: 'flex', gap: 4, padding: '2px 4px' }}>
-            {me && (
-              <button onClick={() => { setEditVal(m.content); setEditing(true) }}
-                style={{ fontSize: 11, color: '#8b949e', background: '#21262d', border: '1px solid #30363d', cursor: 'pointer', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
-                ✏️ 編集
-              </button>
-            )}
-            <button onClick={() => onDelete(m.id)}
-              style={{ fontSize: 11, color: '#f85149', background: 'rgba(248,81,73,0.1)', border: '1px solid rgba(248,81,73,0.3)', cursor: 'pointer', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
-              🗑️ 削除
-            </button>
-          </div>
+          <p style={{ fontSize: 14, color: '#cdd9e5', lineHeight: 1.55, wordBreak: 'break-word', margin: 0 }}>{m.content}</p>
         )}
       </div>
+
+      {/* Floating toolbar on hover */}
+      {!editing && (canDelete || canEdit) && hover && (
+        <div style={{
+          position: 'absolute', right: 16, top: -2,
+          display: 'flex', gap: 1,
+          background: '#1e2530', border: `1px solid ${BD}`,
+          borderRadius: 9, padding: '2px 3px',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+          zIndex: 10,
+        }}>
+          {canEdit && (
+            <button onClick={() => { setEditVal(m.content); setEditing(true) }} title="編集"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 7px', borderRadius: 6, color: MUT, fontSize: 14 }}>✏️</button>
+          )}
+          {canDelete && (
+            <button onClick={() => onDelete(m.id)} title="削除"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 7px', borderRadius: 6, color: '#f85149', fontSize: 14 }}>🗑️</button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
