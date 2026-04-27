@@ -217,7 +217,7 @@ export default function Page() {
     return () => { pSub.unsubscribe(); mSub.unsubscribe(); fSub.unsubscribe(); gSub.unsubscribe(); if (timerRef.current) clearInterval(timerRef.current) }
   }, [ready, loadFriends, loadGroups, loadGlobal, upsert])
 
-  const changeServer = (s: number) => { setServer(s); serverRef.current = s; setGlobalMsgs([]); loadGlobal(s); upsert() }
+  const changeServer = (s: number) => { if (s !== server) setGlobalMsgs([]); setServer(s); serverRef.current = s; loadGlobal(s); upsert() }
   const handleLogout = async () => {
     const uid = userIdRef.current
     if (timerRef.current) clearInterval(timerRef.current)
@@ -254,15 +254,19 @@ export default function Page() {
   const sendGlobal = async () => {
     const txt = moderate(globalInput.trim()); if (!txt || isSending) return
     setGlobalInput('')
-    const msgId = crypto.randomUUID()
-    const now = new Date().toISOString()
-    setGlobalMsgs(p => [...p, { id: msgId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current, created_at: now }])
+    const tempId = `~${Date.now()}`
+    setGlobalMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current, created_at: new Date().toISOString() }])
     setIsSending(true)
     try {
-      await Promise.race([
-        supabase.from('messages').insert({ id: msgId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current }),
-        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+      const res: any = await Promise.race([
+        supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current }).select(),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
       ])
+      const inserted: Message | undefined = res?.data?.[0]
+      if (inserted) setGlobalMsgs(prev => {
+        const without = prev.filter(m => m.id !== tempId)
+        return without.some(m => m.id === inserted.id) ? without : [...without, inserted]
+      })
     } catch (e) {
       console.error('sendGlobal error:', e)
     } finally {
@@ -292,15 +296,19 @@ export default function Page() {
     const txt = moderate(dmInput.trim()); if (!txt || !selFriend || isSending) return
     setDmInput('')
     const sf = selFriend; const uid = userIdRef.current
-    const msgId = crypto.randomUUID()
-    const now = new Date().toISOString()
-    setDmMsgs(p => [...p, { id: msgId, user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf, group_id: null, server_id: null, created_at: now }])
+    const tempId = `~${Date.now()}`
+    setDmMsgs(p => [...p, { id: tempId, user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf, group_id: null, server_id: null, created_at: new Date().toISOString() }])
     setIsSending(true)
     try {
-      await Promise.race([
-        supabase.from('messages').insert({ id: msgId, user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf }),
-        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+      const res: any = await Promise.race([
+        supabase.from('messages').insert({ user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf }).select(),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
       ])
+      const inserted: Message | undefined = res?.data?.[0]
+      if (inserted) setDmMsgs(prev => {
+        const without = prev.filter(m => m.id !== tempId)
+        return without.some(m => m.id === inserted.id) ? without : [...without, inserted]
+      })
     } catch (e) {
       console.error('sendDm error:', e)
     } finally {
@@ -324,15 +332,19 @@ export default function Page() {
     const txt = moderate(groupInput.trim()); if (!txt || !selGroup || isSending) return
     setGroupInput('')
     const sg = selGroup
-    const msgId = crypto.randomUUID()
-    const now = new Date().toISOString()
-    setGroupMsgs(p => [...p, { id: msgId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: sg, server_id: null, created_at: now }])
+    const tempId = `~${Date.now()}`
+    setGroupMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: sg, server_id: null, created_at: new Date().toISOString() }])
     setIsSending(true)
     try {
-      await Promise.race([
-        supabase.from('messages').insert({ id: msgId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg }),
-        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+      const res: any = await Promise.race([
+        supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg }).select(),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
       ])
+      const inserted: Message | undefined = res?.data?.[0]
+      if (inserted) setGroupMsgs(prev => {
+        const without = prev.filter(m => m.id !== tempId)
+        return without.some(m => m.id === inserted.id) ? without : [...without, inserted]
+      })
     } catch (e) {
       console.error('sendGroupMsg error:', e)
     } finally {
