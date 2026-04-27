@@ -115,6 +115,11 @@ export default function Page() {
     check(); window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') setIsSending(false) }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
   useEffect(() => { if (!ready) return; navigator.mediaDevices?.getUserMedia({ audio: true }).catch(() => {}) }, [ready])
   useEffect(() => { srRef.current = { status: statusInput, game: gameInput, recruiting } }, [statusInput, gameInput, recruiting])
   useEffect(() => { globalEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [globalMsgs])
@@ -249,15 +254,18 @@ export default function Page() {
   const sendGlobal = async () => {
     const txt = moderate(globalInput.trim()); if (!txt || isSending) return
     setGlobalInput('')
-    const tempId = `~${Date.now()}_${txt.slice(0, 10)}`
-    setGlobalMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current, created_at: new Date().toISOString() }])
+    const msgId = crypto.randomUUID()
+    const now = new Date().toISOString()
+    setGlobalMsgs(p => [...p, { id: msgId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current, created_at: now }])
     setIsSending(true)
-    const resetTimer = setTimeout(() => setIsSending(false), 8000)
     try {
-      const { error } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current })
-      if (error) console.error('sendGlobal error:', error)
+      await Promise.race([
+        supabase.from('messages').insert({ id: msgId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: null, server_id: serverRef.current }),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+      ])
+    } catch (e) {
+      console.error('sendGlobal error:', e)
     } finally {
-      clearTimeout(resetTimer)
       setIsSending(false)
     }
   }
@@ -284,15 +292,18 @@ export default function Page() {
     const txt = moderate(dmInput.trim()); if (!txt || !selFriend || isSending) return
     setDmInput('')
     const sf = selFriend; const uid = userIdRef.current
-    const tempId = `~${Date.now()}_${txt.slice(0, 10)}`
-    setDmMsgs(p => [...p, { id: tempId, user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf, group_id: null, server_id: null, created_at: new Date().toISOString() }])
+    const msgId = crypto.randomUUID()
+    const now = new Date().toISOString()
+    setDmMsgs(p => [...p, { id: msgId, user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf, group_id: null, server_id: null, created_at: now }])
     setIsSending(true)
-    const resetTimer = setTimeout(() => setIsSending(false), 8000)
     try {
-      const { error } = await supabase.from('messages').insert({ user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf })
-      if (error) console.error('sendDm error:', error)
+      await Promise.race([
+        supabase.from('messages').insert({ id: msgId, user_id: uid, user_name: userNameRef.current, content: txt, dm_to: sf }),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+      ])
+    } catch (e) {
+      console.error('sendDm error:', e)
     } finally {
-      clearTimeout(resetTimer)
       setIsSending(false)
     }
   }
@@ -313,15 +324,18 @@ export default function Page() {
     const txt = moderate(groupInput.trim()); if (!txt || !selGroup || isSending) return
     setGroupInput('')
     const sg = selGroup
-    const tempId = `~${Date.now()}_${txt.slice(0, 10)}`
-    setGroupMsgs(p => [...p, { id: tempId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: sg, server_id: null, created_at: new Date().toISOString() }])
+    const msgId = crypto.randomUUID()
+    const now = new Date().toISOString()
+    setGroupMsgs(p => [...p, { id: msgId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, dm_to: null, group_id: sg, server_id: null, created_at: now }])
     setIsSending(true)
-    const resetTimer = setTimeout(() => setIsSending(false), 8000)
     try {
-      const { error } = await supabase.from('messages').insert({ user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg })
-      if (error) console.error('sendGroupMsg error:', error)
+      await Promise.race([
+        supabase.from('messages').insert({ id: msgId, user_id: userIdRef.current, user_name: userNameRef.current, content: txt, group_id: sg }),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+      ])
+    } catch (e) {
+      console.error('sendGroupMsg error:', e)
     } finally {
-      clearTimeout(resetTimer)
       setIsSending(false)
     }
   }
@@ -648,7 +662,7 @@ export default function Page() {
       </div>
 
       {/* Input */}
-      <div style={{ padding: '8px 16px 16px', flexShrink: 0 }}>
+      <div style={{ padding: '8px 16px calc(16px + env(safe-area-inset-bottom))', flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: 0, background: '#21262d', borderRadius: 14, border: `1px solid ${BD}`, alignItems: 'center', overflow: 'hidden' }}>
           <input
             value={chatType === 'global' ? globalInput : chatType === 'dm' ? dmInput : groupInput}
@@ -929,7 +943,7 @@ export default function Page() {
         {inChat ? ChatArea : (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             {tab === 'all' && (
-              <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 70 }}>
+              <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 'calc(70px + env(safe-area-inset-bottom))' }}>
                 {/* Global chat button */}
                 <div style={{ padding: '8px 12px 0' }}>
                   <button onClick={() => setChatType('global')}
@@ -968,7 +982,7 @@ export default function Page() {
               </div>
             )}
             {tab !== 'all' && (
-              <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 70 }}>
+              <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 'calc(70px + env(safe-area-inset-bottom))' }}>
                 {ListPanel}
               </div>
             )}
@@ -978,7 +992,7 @@ export default function Page() {
 
       {/* Mobile bottom nav */}
       {!inChat && (
-        <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, display: 'flex', background: CARD, borderTop: `1px solid ${BD}`, zIndex: 20 }}>
+        <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, display: 'flex', background: CARD, borderTop: `1px solid ${BD}`, zIndex: 20, paddingBottom: 'env(safe-area-inset-bottom)' }}>
           {([['all','🌐','全体'],['friends','👥','友達'],['groups','💬','グループ']] as [Tab,string,string][]).map(([t, icon, label]) => {
             const badge = t === 'friends' && pending.length > 0 ? pending.length : 0
             return (

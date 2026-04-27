@@ -2,6 +2,7 @@
 
 *, *::before, *::after {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html, body {
@@ -17,7 +18,15 @@ html {
 body {
   background: #0d1117;
   color: #e6edf3;
-  font-family: 'Yu Gothic UI', 'Hiragino Sans', system-ui, sans-serif;
+  font-family: 'Hiragino Sans', 'Yu Gothic UI', system-ui, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Prevent auto-zoom on inputs in iOS Safari (requires font-size >= 16px) */
+@media (max-width: 767px) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
 }
 
 ::-webkit-scrollbar { width: 4px; }

@@ -1,0 +1,11 @@
+{
+  "name": "ゲーム友達SNS",
+  "short_name": "ゲーム友達",
+  "description": "ゲーマー向けミニSNS",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "lang": "ja"
+}

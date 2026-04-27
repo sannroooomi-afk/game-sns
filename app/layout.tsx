@@ -4,6 +4,12 @@ import './globals.css'
 export const metadata: Metadata = {
   title: '🎮 ゲーム友達SNS',
   description: 'ゲーマー向けミニSNS',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'ゲーム友達',
+  },
 }
 
 export const viewport: Viewport = {
@@ -11,6 +17,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  viewportFit: 'cover',
+  themeColor: '#0d1117',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
